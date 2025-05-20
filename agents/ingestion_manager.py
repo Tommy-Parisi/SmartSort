@@ -11,13 +11,13 @@ IGNORED_FILENAMES = {'.DS_Store', 'Thumbs.db'} # Special ignored files
 
 class IngestionManager:
     def __init__(self, root_folder: str, recursive: bool = True):
-        self.root = Path(root_folder)
+        self.root = Path(root_folder).resolve()
         self.recursive = recursive
         self.file_meta_queue: List[FileMeta] = []
 
     def scan(self):
         if not self.root.exists() or not self.root.is_dir():
-            log_error(f"Root folder {self.root} does not exist or is not a directory.")
+            log_error(f"[IngestionManager] Root folder {self.root} does not exist or is not a directory.")
             return
         
         files = self.root.rglob("*") if self.recursive else self.root.glob("*")
