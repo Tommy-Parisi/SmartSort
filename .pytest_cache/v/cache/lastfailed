@@ -1,3 +1,5 @@
 {
-  "tests/test_import.py": true
+  "tests/test_import.py": true,
+  "tests/test_ingestion_router.py::test_ingestion_ignores_hidden_and_zero_byte_files": true,
+  "tests/test_ingestion_router.py::test_ingestion_skips_symlinks": true
 }
