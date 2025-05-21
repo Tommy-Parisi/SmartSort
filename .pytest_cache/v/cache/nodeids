@@ -1,4 +1,10 @@
 [
+  "tests/test_extractor_router.py::test_extractor_router_edge_cases[archive.zip-unknown-error]",
+  "tests/test_extractor_router.py::test_extractor_router_edge_cases[binary.txt-text-success]",
+  "tests/test_extractor_router.py::test_extractor_router_edge_cases[empty.txt-text-error]",
+  "tests/test_extractor_router.py::test_extractor_router_edge_cases[fake.pdf-pdf-error]",
+  "tests/test_extractor_router.py::test_extractor_router_edge_cases[mystery.xyz-unknown-error]",
+  "tests/test_extractor_router.py::test_extractor_router_outputs_clean_text",
   "tests/test_ingestion.py::test_ingestion_manager_metadata_fields",
   "tests/test_ingestion.py::test_ingestion_manager_valid_files",
   "tests/test_ingestion.py::test_invalid_root_folder_logs_error"

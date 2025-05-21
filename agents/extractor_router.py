@@ -29,6 +29,11 @@ class ExtractorRouter:
         try:
             raw_text = extractor.extract(file_meta.file_path)
             normalized = normalize_text(raw_text)
+
+            if not normalized.strip():
+                log_error(f"[ExtractorRouter] Empty output after extraction: {file_meta.file_name}")
+                return FileContent(file_meta=file_meta, raw_text="", status="error")
+
             return FileContent(file_meta=file_meta, raw_text=normalized, status="success")
 
         except Exception as e:
