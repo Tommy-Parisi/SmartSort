@@ -1,7 +1,7 @@
 # Created by pytest automatically.
 /fileSortVenv
 
-tests/mixed_inputs/
+tests/mixed_inputs
 
 __pycache__/
 *.pyc
