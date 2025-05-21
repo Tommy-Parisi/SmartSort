@@ -19,10 +19,14 @@ class IngestionManager:
         if not self.root.exists() or not self.root.is_dir():
             log_error(f"[IngestionManager] Root folder {self.root} does not exist or is not a directory.")
             return
-        
+
         files = self.root.rglob("*") if self.recursive else self.root.glob("*")
         for file_path in files:
             if not file_path.is_file():
+                continue
+            if file_path.is_symlink():
+                continue
+            if file_path.name.startswith('.'):
                 continue
             if file_path.name in IGNORED_FILENAMES:
                 continue
@@ -35,6 +39,7 @@ class IngestionManager:
                     self.file_meta_queue.append(meta)
             except Exception as e:
                 log_error(f"[IngestionManager] Failed to ingest {file_path}: {e}")
+
         
     def create_file_meta(self, file_path: Path) -> FileMeta:
         extension = file_path.suffix.lower()

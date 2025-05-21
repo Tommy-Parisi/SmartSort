@@ -1,26 +1,31 @@
-def run_pipeline(input_folder):
+from agents.ingestion_manager import IngestionManager
+from agents.extractor_router import ExtractorRouter
+from core.models import FileContent
+
+def run_pipeline(input_folder: str):
+    print(f"\n Starting pipeline on: {input_folder}\n")
+
     # 1. Ingestion
-    #ingestor = IngestionManager(input_folder)
-    #ingestor.scan()
-    #files = ingestor.file_meta_queue
+    ingestor = IngestionManager(input_folder)
+    ingestor.scan()
+
+    if not ingestor.file_meta_queue:
+        print("  No files found. Check your folder path or filters.")
+        return
+
+    print(f" Ingested {len(ingestor.file_meta_queue)} files.\n")
 
     # 2. Extraction
-    #router = ExtractorRouter()
-    #extracted = [router.route(f) for f in files]
+    router = ExtractorRouter()
+    extracted = []
 
-    # 3. Embedding
-    #embedder = EmbeddingAgent()
-    #embedded = [embedder.embed(f) for f in extracted]
+    for fmeta in ingestor.file_meta_queue:
+        content: FileContent = router.route(fmeta)
+        extracted.append(content)
+        status_icon = "GOOD" if content.status == "success" else "X"
+        print(f"{status_icon} {fmeta.file_name} → {content.status}")
 
-    # 4. Clustering
-    #clusterer = ClusteringAgent()
-    #clustered = clusterer.cluster(embedded)
+    success_count = sum(1 for f in extracted if f.status == "success")
+    fail_count = len(extracted) - success_count
 
-    # 5. Naming
-    #naming_agent = FolderNamingAgent()
-    #clusters = group_by_cluster_id(clustered)
-    #folder_names = naming_agent.name_clusters(clusters)
-
-    # 6. Relocation
-    #mover = FileRelocationAgent()
-    #mover.move_files(clustered, folder_names)
+    print(f"\n Extraction complete: {success_count} success, {fail_count} failed\n")
