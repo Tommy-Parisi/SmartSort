@@ -23,3 +23,12 @@ class EmbeddedFile:
     embedding: list
     raw_text: str
     status: str = "embedded"
+
+@dataclass
+class ClusteredFile:
+    file_meta: FileMeta
+    embedding: list[float]
+    raw_text: str
+    cluster_id: int  # -1 for noise
+    status: str = "clustered"
+
