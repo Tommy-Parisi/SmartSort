@@ -5,5 +5,5 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
-.env/
+.env
 tests/testDoc_copy/
