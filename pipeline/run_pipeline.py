@@ -85,12 +85,15 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
     naming_agent = FolderNamingAgent()
     folder_names = naming_agent.name_clusters(cluster_map)
 
+    # 5.1 Merging Similar Clusters
+    folder_names = ClusteringAgent.merge_similar_clusters(cluster_map, folder_names)
+
     print("\n--- Final Cluster Labels ---")
     for cluster_id, files in sorted(cluster_map.items()):
         label = folder_names.get(cluster_id, f"cluster_{cluster_id}")
         print(f"\n{label} (Cluster {cluster_id}) — {len(files)} file{'s' if len(files) != 1 else ''}")
         for f in files:
-            print(f"  - {f.file_meta.file_name}")
+            print(f"  - {f.file_meta.file_name}")  
 
     # 6. File Relocation 
     relocation_agent = FileRelocationAgent(base_destination_dir=input_folder, dry_run=False)
