@@ -1,4 +1,5 @@
 tests/mixed_inputs/
+tests/unsortedTest/
 /fileSortVenv
 __pycache__/
 *.pyc

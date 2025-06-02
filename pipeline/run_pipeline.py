@@ -5,6 +5,7 @@ from agents.clustering_agent import ClusteringAgent
 from agents.folder_naming_agent import FolderNamingAgent
 from core.models import FileContent
 from collections import defaultdict
+from agents.file_relocation_agent import FileRelocationAgent
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -90,5 +91,20 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
         print(f"\n{label} (Cluster {cluster_id}) — {len(files)} file{'s' if len(files) != 1 else ''}")
         for f in files:
             print(f"  - {f.file_meta.file_name}")
+
+    # 6. File Relocation 
+    relocation_agent = FileRelocationAgent(base_destination_dir=input_folder, dry_run=False)
+    relocation_results = relocation_agent.relocate_files(cluster_map)
+    print("\n--- File Relocation Results ---")
+    for status, messages in relocation_results.items():
+        if messages:
+            print(f"{status.capitalize()}:")
+            for msg in messages:
+                print(f"  - {msg}")
+        else:
+            print(f"{status.capitalize()}: None")
+
+    print("\nPipeline completed successfully!\n")
+
 
 
