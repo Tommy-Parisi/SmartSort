@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer, util
 from collections import defaultdict
 
 class ClusteringAgent:
-    def __init__(self, max_clusters=8):
+    def __init__(self, max_clusters=20):
         self.max_clusters = max_clusters
         self.name_embedder = SentenceTransformer("all-MiniLM-L6-v2")  
 

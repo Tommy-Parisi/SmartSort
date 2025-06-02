@@ -86,7 +86,9 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
     folder_names = naming_agent.name_clusters(cluster_map)
 
     # 5.1 Merging Similar Clusters
-    folder_names = ClusteringAgent.merge_similar_clusters(cluster_map, folder_names)
+    cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
+    folder_names = naming_agent.name_clusters(cluster_map)
+
 
     print("\n--- Final Cluster Labels ---")
     for cluster_id, files in sorted(cluster_map.items()):
