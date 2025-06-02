@@ -63,7 +63,7 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
             print(f"Vector length: {len(embedded_file.embedding)}\n")
 
     # 4. Clustering
-    clusterer = ClusteringAgent(n_clusters = max(2, len(embedded) // 5) ) 
+    clusterer = ClusteringAgent()
     clustered = clusterer.cluster(embedded)
 
     if clustered:

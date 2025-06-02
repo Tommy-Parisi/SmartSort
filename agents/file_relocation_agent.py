@@ -50,10 +50,10 @@ class FileRelocationAgent:
                     log_error(f"[FileRelocationAgent] {error_msg}")
                     results["errors"].append(error_msg)
                     continue
-            
+
             # Move each file in the cluster
             for file in files:
-                source_path = file.file_meta.path
+                source_path = file.file_meta.file_path
                 if not os.path.exists(source_path):
                     error_msg = f"Source file not found: {source_path}"
                     log_error(f"[FileRelocationAgent] {error_msg}")

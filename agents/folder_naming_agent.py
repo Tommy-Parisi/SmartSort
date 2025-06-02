@@ -65,7 +65,7 @@ Ignore the order of examples. Focus on the common semantic themes across them al
 Examples:
 {numbered}
 
-Respond with only the folder name, no punctuation or quotes."""
+Respond with only the folder name, no punctuation or quotes, do not end with the word folder."""
 
     def _hash_prompt(self, examples: list[str]) -> str:
         key = json.dumps(sorted(examples), separators=(',', ':'))
