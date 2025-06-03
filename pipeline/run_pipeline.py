@@ -63,29 +63,40 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
             print(f"Vector length: {len(embedded_file.embedding)}\n")
 
     # 4. Clustering
-    clusterer = ClusteringAgent()
+    print("\n--- Clustering Phase ---")
+    clusterer = ClusteringAgent(fallback_k_range=(2, 10), min_cluster_size=3)
+    print("Clustering with HDBSCAN (fallback to Agglomerative if needed)...")
+
     clustered = clusterer.cluster(embedded)
 
     if clustered:
         n_clusters = len(set(f.cluster_id for f in clustered))
-        print(f"\nClustering complete: {n_clusters} clusters\n")
+        print(f"\nClustering complete: selected {n_clusters} clusters.\n")
 
         cluster_map = defaultdict(list)
-    for f in clustered:
-        cluster_map[f.cluster_id].append(f)
+        for f in clustered:
+            cluster_map[f.cluster_id].append(f)
 
-    # Log each cluster and its members
-    print("\n--- Cluster Breakdown ---")
-    for cluster_id, files in sorted(cluster_map.items()):
-        print(f"\nCluster {cluster_id} ({len(files)} file{'s' if len(files) != 1 else ''}):")
-        for f in files:
-            print(f"  - {f.file_meta.file_name}")
+        # Log each cluster and its members
+        print("\n--- Cluster Breakdown ---")
+        for cluster_id, files in sorted(cluster_map.items()):
+            print(f"\nCluster {cluster_id} ({len(files)} file{'s' if len(files) != 1 else ''}):")
+            for f in files:
+                print(f"  - {f.file_meta.file_name}")
+
 
     # 5. Folder Naming
     naming_agent = FolderNamingAgent()
     folder_names = naming_agent.name_clusters(cluster_map)
+    print("\n--- Initial Cluster Labels ---")
+    for cluster_id, files in sorted(cluster_map.items()):
+        label = folder_names.get(cluster_id, f"cluster_{cluster_id}")
+        print(f"\n{label} (Cluster {cluster_id}) — {len(files)} file{'s' if len(files) != 1 else ''}")
+        for f in files:
+            print(f"  - {f.file_meta.file_name}")
 
     # 5.1 Merging Similar Clusters
+    print("\n--- Merging Similar Clusters ---")
     cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
     folder_names = naming_agent.name_clusters(cluster_map)
 
@@ -101,13 +112,13 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
     relocation_agent = FileRelocationAgent(base_destination_dir=input_folder, dry_run=False)
     relocation_results = relocation_agent.relocate_files(cluster_map)
     print("\n--- File Relocation Results ---")
-    for status, messages in relocation_results.items():
-        if messages:
-            print(f"{status.capitalize()}:")
-            for msg in messages:
-                print(f"  - {msg}")
-        else:
-            print(f"{status.capitalize()}: None")
+    #for status, messages in relocation_results.items():
+        #if messages:
+        #    print(f"{status.capitalize()}:")
+        #    for msg in messages:
+        #        print(f"  - {msg}")
+        #else:
+        #    print(f"{status.capitalize()}: None")
 
     print("\nPipeline completed successfully!\n")
 
