@@ -1,10 +1,39 @@
-tests/mixed_inputs/
-tests/unsortedTest/
-/fileSortVenv
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
-.env
-tests/testDoc_copy/
+# === FRONTEND (Tauri/Svelte) ===
+/frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
+frontend/package/
+frontend/vite.config.js.timestamp-*
+frontend/vite.config.ts.timestamp-*
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# OS junk
+.DS_Store
+
+# === BACKEND (Python) ===
+backend/fileSortVenv/
+backend/__pycache__/
+/*.egg-info/
+*.py[cod]
+backend/.env
+
+# Ignore test data folders
+backend/tests/mixed_inputs/
+backend/tests/unsortedTest/
+backend/tests/testDoc_copy/
+
+# === Tauri build artifacts ===
+frontend/src-tauri/target/
+frontend/src-tauri/.cargo/
+*.exe
+*.dmg
+*.app
+*.zip
+
+# === IDEs / Editors ===
+.vscode/
+.idea/
+*.log
+*.swp

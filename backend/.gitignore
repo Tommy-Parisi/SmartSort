@@ -1,0 +1,10 @@
+tests/mixed_inputs/
+tests/unsortedTest/
+/fileSortVenv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+tests/testDoc_copy/
