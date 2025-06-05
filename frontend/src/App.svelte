@@ -1,7 +1,8 @@
 <script lang="ts">
-  import DropZone from '../components/DropZone.svelte';
-  import SettingsPanel from '../components/SettingsPanel.svelte';
-  import { runSorter, previewSort, type SortOptions } from '../lib/backend';
+  import { onMount } from 'svelte';
+  import DropZone from './components/DropZone.svelte';
+  import SettingsPanel from './components/SettingsPanel.svelte';
+  import { runSorter, previewSort, type SortOptions } from './lib/backend';
   
   let previewCount = 0;
   let selectedFolder: string | null = null;
@@ -187,4 +188,4 @@
     margin: 1rem 0;
     font-size: 0.9rem;
   }
-</style>
+</style> 
