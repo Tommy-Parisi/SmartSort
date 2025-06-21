@@ -27,10 +27,19 @@ backend/tests/testDoc_copy/
 # === Tauri build artifacts ===
 frontend/src-tauri/target/
 frontend/src-tauri/.cargo/
+frontend/src-tauri/Cargo.lock
+frontend/src-tauri/build.rs
 *.exe
 *.dmg
 *.app
 *.zip
+
+# === Tauri generated icons ===
+frontend/src-tauri/icons/*.png
+frontend/src-tauri/icons/*.ico
+frontend/src-tauri/icons/*.icns
+frontend/src-tauri/icons/StoreLogo.png
+frontend/src-tauri/icons/Square*.png
 
 # === IDEs / Editors ===
 .vscode/
