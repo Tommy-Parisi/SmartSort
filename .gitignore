@@ -29,6 +29,7 @@ frontend/src-tauri/target/
 frontend/src-tauri/.cargo/
 frontend/src-tauri/Cargo.lock
 frontend/src-tauri/build.rs
+frontend/src-tauri/gen/
 *.exe
 *.dmg
 *.app

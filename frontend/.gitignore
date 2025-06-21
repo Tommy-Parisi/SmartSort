@@ -20,3 +20,7 @@ src-tauri/icons/*.ico
 src-tauri/icons/*.icns
 src-tauri/icons/StoreLogo.png
 src-tauri/icons/Square*.png
+
+# Tauri generated files
+src-tauri/gen/
+src-tauri/.cargo/

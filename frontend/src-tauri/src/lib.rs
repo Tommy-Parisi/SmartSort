@@ -7,6 +7,7 @@ pub fn run() {
     .plugin(tauri_plugin_shell::init())
     .invoke_handler(tauri::generate_handler![
       commands::select_folder,
+      commands::select_files,
       commands::preview_sort
     ])
     .setup(|app| {

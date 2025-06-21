@@ -8,6 +8,7 @@
   let selectedFolder: string | null = null;
   let isProcessing = false;
   let error: string | null = null;
+  let showFolderSuccess = false;
   
   let sortOptions: SortOptions = {
     clusterSensitivity: 'medium',
@@ -22,6 +23,11 @@
 
   async function handleFolderSelect(event: CustomEvent<string>) {
     selectedFolder = event.detail;
+    showFolderSuccess = true;
+    setTimeout(() => {
+      showFolderSuccess = false;
+    }, 100);
+    
     try {
       previewCount = await previewSort(selectedFolder, sortOptions);
       error = null;
@@ -66,7 +72,11 @@
   </header>
 
   <div class="content">
-    <DropZone on:files={handleFiles} on:folder={handleFolderSelect} />
+    <DropZone 
+      {showFolderSuccess}
+      on:files={handleFiles} 
+      on:folder={handleFolderSelect} 
+    />
     <SettingsPanel bind:options={sortOptions} on:change={handleOptionsChange} />
     
     {#if error}
@@ -86,6 +96,8 @@
       >
         {#if isProcessing}
           Processing...
+        {:else if !selectedFolder}
+          No folder selected
         {:else}
           Run Sorter
         {/if}

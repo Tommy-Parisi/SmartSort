@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DropZone from '../components/DropZone.svelte';
+  import FileSelector from '../components/DropZone.svelte';
   import SettingsPanel from '../components/SettingsPanel.svelte';
   import { runSorter, previewSort, type SortOptions } from '../lib/backend';
   
@@ -15,11 +15,15 @@
   };
 
   async function handleFiles(event: CustomEvent<File[]>) {
+    console.log('=== PARENT: Files event received ===');
+    console.log('Files:', event.detail);
     // TODO: Handle dropped files
     previewCount = event.detail.length;
   }
 
   async function handleFolderSelect(event: CustomEvent<string>) {
+    console.log('=== PARENT: Folder event received ===');
+    console.log('Folder:', event.detail);
     selectedFolder = event.detail;
     try {
       previewCount = await previewSort(selectedFolder, sortOptions);
@@ -65,7 +69,7 @@
   </header>
 
   <div class="content">
-    <DropZone on:files={handleFiles} on:folder={handleFolderSelect} />
+    <FileSelector on:files={handleFiles} on:folder={handleFolderSelect} />
     <SettingsPanel bind:options={sortOptions} on:change={handleOptionsChange} />
     
     {#if error}
