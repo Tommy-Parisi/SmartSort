@@ -1,5 +1,4 @@
 import argparse
-from pipeline.cli import run_pipeline  
 
 def main():
     parser = argparse.ArgumentParser(description="Run the Synapse Sorter pipeline.")
@@ -22,6 +21,8 @@ def main():
         # For preview mode, just return a mock cluster count
         print("Found 5 clusters")
     else:
+        # Import here to avoid heavy dependencies unless needed
+        from pipeline.run_pipeline import run_pipeline
         run_pipeline(args.folder)
 
 if __name__ == "__main__":
