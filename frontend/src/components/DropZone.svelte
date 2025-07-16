@@ -33,10 +33,13 @@
     } catch (err) {
       console.error('Error selecting folder:', err);
       console.error('Error type:', typeof err);
-      console.error('Error name:', err?.name);
-      console.error('Error message:', err?.message);
-      console.error('Error stack:', err?.stack);
-      console.error('Error details:', JSON.stringify(err, null, 2));
+
+      if (err instanceof Error) {
+        console.error('Error name:', err.name);
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
+      }
+
       showSuccessMessage('An error occurred while selecting folder', false);
     }
   }
