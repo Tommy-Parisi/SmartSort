@@ -32,11 +32,12 @@
       showSuccessMessage('Folder selected successfully!', true);
     } catch (err) {
       console.error('Error selecting folder:', err);
-      console.error('Error type:', typeof err);
-      console.error('Error name:', err?.name);
-      console.error('Error message:', err?.message);
-      console.error('Error stack:', err?.stack);
-      console.error('Error details:', JSON.stringify(err, null, 2));
+      if (err instanceof Error) {
+        console.error('Error type:', typeof err);
+        console.error('Error name:', err.name);
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
+      }
       showSuccessMessage('An error occurred while selecting folder', false);
     }
   }
@@ -62,6 +63,12 @@
       showSuccessMessage(`${files.length} file(s) selected!`, false);
     } catch (err) {
       console.error('Error selecting files:', err);
+      if (err instanceof Error) {
+        console.error('Error type:', typeof err);
+        console.error('Error name:', err.name);
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
+      }
       showSuccessMessage('An error occurred while selecting files', false);
     }
   }
