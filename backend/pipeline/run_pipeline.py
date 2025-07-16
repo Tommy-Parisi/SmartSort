@@ -69,20 +69,23 @@ def run_pipeline(input_folder: str, debug_preview: bool = True):
 
     clustered = clusterer.cluster(embedded)
 
-    if clustered:
-        n_clusters = len(set(f.cluster_id for f in clustered))
-        print(f"\nClustering complete: selected {n_clusters} clusters.\n")
+    if not clustered:
+        print("\nNo clusters found. Exiting pipeline early.\n")
+        return
 
-        cluster_map = defaultdict(list)
-        for f in clustered:
-            cluster_map[f.cluster_id].append(f)
+    n_clusters = len(set(f.cluster_id for f in clustered))
+    print(f"\nClustering complete: selected {n_clusters} clusters.\n")
 
-        # Log each cluster and its members
-        print("\n--- Cluster Breakdown ---")
-        for cluster_id, files in sorted(cluster_map.items()):
-            print(f"\nCluster {cluster_id} ({len(files)} file{'s' if len(files) != 1 else ''}):")
-            for f in files:
-                print(f"  - {f.file_meta.file_name}")
+    cluster_map = defaultdict(list)
+    for f in clustered:
+        cluster_map[f.cluster_id].append(f)
+
+    # Log each cluster and its members
+    print("\n--- Cluster Breakdown ---")
+    for cluster_id, files in sorted(cluster_map.items()):
+        print(f"\nCluster {cluster_id} ({len(files)} file{'s' if len(files) != 1 else ''}):")
+        for f in files:
+            print(f"  - {f.file_meta.file_name}")
 
 
     # 5. Folder Naming
