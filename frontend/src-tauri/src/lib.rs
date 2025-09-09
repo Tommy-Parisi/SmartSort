@@ -6,9 +6,9 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_shell::init())
     .invoke_handler(tauri::generate_handler![
-      commands::select_folder,
-      commands::select_files,
-      commands::preview_sort
+        commands::select_files,
+        commands::preview_sort,
+        commands::run_sort
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

@@ -21,12 +21,15 @@
     previewCount = event.detail.length;
   }
 
-  async function handleFolderSelect(event: CustomEvent<string>) {
-    selectedFolder = event.detail;
+  // SINGLE folder selection handler
+  async function handleFolderSelected(event: CustomEvent<{ path: string }>) {
+    selectedFolder = event.detail.path;
     showFolderSuccess = true;
     setTimeout(() => {
       showFolderSuccess = false;
-    }, 100);
+    }, 2000);
+    
+    console.log('Selected folder:', selectedFolder);
     
     try {
       previewCount = await previewSort(selectedFolder, sortOptions);
@@ -52,10 +55,18 @@
     }
   }
 
-  function handleOptionsChange(event: CustomEvent<SortOptions>) {
+  async function handleOptionsChange(event: CustomEvent<SortOptions>) {
     sortOptions = event.detail;
+    
+    // Re-run preview if folder is already selected
     if (selectedFolder) {
-      handleFolderSelect(new CustomEvent('folder', { detail: selectedFolder }));
+      try {
+        previewCount = await previewSort(selectedFolder, sortOptions);
+        error = null;
+      } catch (err) {
+        error = err instanceof Error ? err.message : 'An error occurred';
+        previewCount = 0;
+      }
     }
   }
 </script>
@@ -75,7 +86,7 @@
     <DropZone 
       {showFolderSuccess}
       on:files={handleFiles} 
-      on:folder={handleFolderSelect} 
+      on:folderSelected={handleFolderSelected}
     />
     <SettingsPanel bind:options={sortOptions} on:change={handleOptionsChange} />
     
@@ -89,20 +100,19 @@
       {#if previewCount > 0}
         <span class="preview-count">{previewCount} Clusters Previewed</span>
       {/if}
-      <button 
-        class="run-button" 
+      <button
         on:click={handleRunSorter}
         disabled={!selectedFolder || isProcessing}
       >
-        {#if isProcessing}
-          Processing...
-        {:else if !selectedFolder}
-          No folder selected
-        {:else}
-          Run Sorter
-        {/if}
+        Run Sorter
       </button>
     </div>
+
+    {#if selectedFolder}
+      <div class="selected-folder">
+        <p><strong>Selected folder:</strong> {selectedFolder}</p>
+      </div>
+    {/if}
   </div>
 </main>
 
@@ -200,4 +210,17 @@
     margin: 1rem 0;
     font-size: 0.9rem;
   }
-</style> 
+
+  .selected-folder {
+    background-color: #f0f9ff;
+    border: 1px solid #0ea5e9;
+    padding: 1rem;
+    border-radius: 6px;
+    margin-top: 1rem;
+  }
+
+  .selected-folder p {
+    margin: 0;
+    color: #0c4a6e;
+  }
+</style>

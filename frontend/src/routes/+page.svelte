@@ -1,12 +1,16 @@
 <script lang="ts">
   import FileSelector from '../components/DropZone.svelte';
   import SettingsPanel from '../components/SettingsPanel.svelte';
-  import { runSorter, previewSort, type SortOptions } from '../lib/backend';
+  import { runSorter, previewSort, type SortOptions, type SortResult } from '../lib/backend';
+  import SortResults from '../components/SortResults.svelte';
   
   let previewCount = 0;
   let selectedFolder: string | null = null;
   let isProcessing = false;
   let error: string | null = null;
+  let sortResult: SortResult | null = null;
+  let loadingMessage: string | null = null;
+  let showResults = false;
   
   let sortOptions: SortOptions = {
     clusterSensitivity: 'medium',
@@ -26,26 +30,46 @@
     console.log('Folder:', event.detail);
     selectedFolder = event.detail;
     try {
+      loadingMessage = 'Estimating folder count...';
       previewCount = await previewSort(selectedFolder, sortOptions);
       error = null;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'An error occurred';
+      console.error('Preview error details:', err);
+      if (typeof err === 'string') {
+        error = err;
+      } else if (err instanceof Error) {
+        error = err.message;
+      } else {
+        error = JSON.stringify(err);
+      }
       previewCount = 0;
+    } finally {
+      loadingMessage = null;
     }
   }
 
   async function handleRunSorter() {
     if (!selectedFolder) return;
-    
     isProcessing = true;
+    loadingMessage = 'Sorting files...';
     error = null;
-    
     try {
-      await runSorter(selectedFolder, sortOptions);
+      sortResult = await runSorter(selectedFolder, sortOptions);
+      showResults = true;
+      error = null;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'An error occurred';
+      console.error('Sorter error details:', err);
+      if (typeof err === 'string') {
+        error = err;
+      } else if (err instanceof Error) {
+        error = err.message;
+      } else {
+        error = JSON.stringify(err);
+      }
+      sortResult = null;
     } finally {
       isProcessing = false;
+      loadingMessage = null;
     }
   }
 
@@ -54,6 +78,11 @@
     if (selectedFolder) {
       handleFolderSelect(new CustomEvent('folder', { detail: selectedFolder }));
     }
+  }
+
+  function handleBackToSort() {
+    showResults = false;
+    sortResult = null;
   }
 </script>
 
@@ -69,31 +98,40 @@
   </header>
 
   <div class="content">
-    <FileSelector on:files={handleFiles} on:folder={handleFolderSelect} />
-    <SettingsPanel bind:options={sortOptions} on:change={handleOptionsChange} />
-    
-    {#if error}
-      <div class="error-message">
-        {error}
+    {#if loadingMessage}
+      <div class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-message">{loadingMessage}</div>
       </div>
     {/if}
-    
-    <div class="action-bar">
-      {#if previewCount > 0}
-        <span class="preview-count">{previewCount} Clusters Previewed</span>
+
+    {#if showResults && sortResult}
+      <SortResults {sortResult} on:back={handleBackToSort} />
+    {:else}
+      <FileSelector on:files={handleFiles} on:folder={handleFolderSelect} />
+      <SettingsPanel bind:options={sortOptions} on:change={handleOptionsChange} />
+      {#if error}
+        <div class="error-message">
+          {error}
+        </div>
       {/if}
-      <button 
-        class="run-button" 
-        on:click={handleRunSorter}
-        disabled={!selectedFolder || isProcessing}
-      >
-        {#if isProcessing}
-          Processing...
-        {:else}
-          Run Sorter
+      <div class="action-bar">
+        {#if previewCount > 0}
+          <span class="preview-count">{previewCount} Clusters Previewed</span>
         {/if}
-      </button>
-    </div>
+        <button 
+          class="run-button" 
+          on:click={handleRunSorter}
+          disabled={!selectedFolder || isProcessing}
+        >
+          {#if isProcessing}
+            Processing...
+          {:else}
+            Run Sorter
+          {/if}
+        </button>
+      </div>
+    {/if}
   </div>
 </main>
 
@@ -147,6 +185,7 @@
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
+    position: relative;
   }
 
   .action-bar {
@@ -190,5 +229,37 @@
     border-radius: 4px;
     margin: 1rem 0;
     font-size: 0.9rem;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.8);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+  .loading-spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #0078d4;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 1rem;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .loading-message {
+    font-size: 1.1rem;
+    color: #0078d4;
+    font-weight: 500;
   }
 </style>
