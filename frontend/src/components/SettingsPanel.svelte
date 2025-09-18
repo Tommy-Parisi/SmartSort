@@ -32,7 +32,7 @@
       Cluster Sensitivity
       <select
         id="sensitivity"
-        bind:value={options.clusterSensitivity}
+        bind:value={options.cluster_sensitivity}
         on:change={handleChange}
         class="select-input"
       >
@@ -46,7 +46,7 @@
       Folder Naming Style
       <select
         id="naming"
-        bind:value={options.folderNamingStyle}
+        bind:value={options.folder_naming_style}
         on:change={handleChange}
         class="select-input"
       >
@@ -59,7 +59,7 @@
     <label class="checkbox-label">
       <input
         type="checkbox"
-        bind:checked={options.includeSubfolders}
+        bind:checked={options.include_subfolders}
         on:change={handleChange}
         class="checkbox-input"
       />
@@ -70,18 +70,19 @@
 
 <style>
   .settings-panel {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 1.5rem;
     margin: 2rem 0;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
   }
 
   h2 {
     margin: 0 0 1.5rem 0;
     font-size: 1.2rem;
     font-weight: 600;
-    color: #333;
+    color: var(--text-primary);
   }
 
   .settings-group {
@@ -94,29 +95,30 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    color: #444;
+    color: var(--text-primary);
     font-size: 0.95rem;
+    font-weight: 500;
   }
 
   .select-input {
     padding: 0.6rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    background-color: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--bg-primary);
     font-size: 0.95rem;
-    color: #333;
+    color: var(--text-primary);
     cursor: pointer;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, background-color 0.3s ease;
   }
 
   .select-input:hover {
-    border-color: #999;
+    border-color: var(--text-secondary);
   }
 
   .select-input:focus {
     outline: none;
-    border-color: #0078d4;
-    box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.1);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 20%, transparent);
   }
 
   .checkbox-label {
@@ -130,5 +132,12 @@
     width: 1.2rem;
     height: 1.2rem;
     cursor: pointer;
+    accent-color: var(--accent-color);
   }
-</style> 
+
+  /* Dark theme specific styles for select options */
+  :global([data-theme="dark"]) .select-input option {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+</style>

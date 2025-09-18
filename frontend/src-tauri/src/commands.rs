@@ -126,3 +126,29 @@ pub async fn run_sort(folder_path: String, options: Option<SortOptions>) -> Resu
     info!("Sort result JSON: {}", json_str);
     serde_json::from_str(&json_str).map_err(|e| format!("JSON parse error: {}", e))
 }
+#[tauri::command]
+pub async fn select_folder(app_handle: AppHandle) -> Result<String, String> {
+    info!("select_folder command called");
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    app_handle.dialog().file().pick_folder(move |folder_path| {
+        info!("Folder dialog callback received: {:?}", folder_path);
+        let path = folder_path.map(|p| p.to_string());
+        let _ = tx.send(path);
+    });
+    
+    match rx.await {
+        Ok(Some(path)) => {
+            info!("Folder selected successfully: {:?}", path);
+            Ok(path)
+        }
+        Ok(None) => {
+            info!("No folder selected (user cancelled)");
+            Err("No folder selected".to_string())
+        }
+        Err(_) => {
+            error!("Failed to receive folder selection response");
+            Err("Failed to receive folder selection".to_string())
+        }
+    }
+}

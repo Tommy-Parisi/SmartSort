@@ -1,6 +1,6 @@
-from core.models import FileMeta, FileContent
-from core.utils import log_error, normalize_text
-from agents.extractors import (
+from ..core.models import FileMeta, FileContent
+from ..core.utils import log_error, normalize_text
+from .extractors import (
     PDFExtractorAgent,
     DocxExtractorAgent,
     TextExtractorAgent,

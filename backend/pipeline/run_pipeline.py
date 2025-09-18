@@ -1,11 +1,11 @@
-from agents.ingestion_manager import IngestionManager
-from agents.extractor_router import ExtractorRouter
-from agents.embedding_agent import EmbeddingAgent
-from agents.clustering_agent import ClusteringAgent
-from agents.folder_naming_agent import FolderNamingAgent
+from backend.agents.ingestion_manager import IngestionManager
+from backend.agents.extractor_router import ExtractorRouter
+from backend.agents.embedding_agent import EmbeddingAgent
+from backend.agents.clustering_agent import ClusteringAgent
+from backend.agents.folder_naming_agent import FolderNamingAgent
 from core.models import FileContent
 from collections import defaultdict
-from agents.file_relocation_agent import FileRelocationAgent
+from backend.agents.file_relocation_agent import FileRelocationAgent
 from dotenv import load_dotenv
 load_dotenv()
 

@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import List
-from core.models import FileMeta
-from core.constants import FILE_TYPE_MAP
-from core.utils import log_error, readable_size
+from ..core.models import FileMeta
+from ..core.constants import FILE_TYPE_MAP
+from ..core.utils import log_error, readable_size
 
 IGNORED_EXTENSIONS = {'.tmp', '.part', '.log'} # Maintain list of ignored extensions
 IGNORED_FILENAMES = {'.DS_Store', 'Thumbs.db'} # Special ignored files

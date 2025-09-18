@@ -1,8 +1,8 @@
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import calinski_harabasz_score
-from core.models import EmbeddedFile, ClusteredFile
-from core.utils import log_error
+from ..core.models import EmbeddedFile, ClusteredFile
+from ..core.utils import log_error
 from sentence_transformers import SentenceTransformer, util
 from collections import defaultdict
 from sklearn.metrics.pairwise import cosine_distances

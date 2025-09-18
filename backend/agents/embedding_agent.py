@@ -1,6 +1,6 @@
 from sentence_transformers import SentenceTransformer
-from core.models import FileContent, EmbeddedFile
-from core.utils import log_error
+from ..core.models import FileContent, EmbeddedFile
+from ..core.utils import log_error
 
 class EmbeddingAgent:
     def __init__(self, model_name="all-MiniLM-L6-v2"):

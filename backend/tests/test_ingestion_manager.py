@@ -3,8 +3,8 @@ import shutil
 from pathlib import Path
 import pytest
 
-from agents.ingestion_manager import IngestionManager
-from core.models import FileMeta
+from backend.agents.ingestion_manager import IngestionManager
+from backend.core.models import FileMeta
 
 TEST_DIR = Path("tests/temp_test_files")
 

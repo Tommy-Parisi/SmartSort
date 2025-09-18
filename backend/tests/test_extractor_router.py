@@ -2,8 +2,8 @@ import shutil
 import tempfile
 from pathlib import Path
 import pytest
-from agents.extractor_router import ExtractorRouter
-from core.models import FileMeta
+from backend.agents.extractor_router import ExtractorRouter
+from backend.core.models import FileMeta
 import fpdf
 
 # ==== FIXTURE SETUP ====

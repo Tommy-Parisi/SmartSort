@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export interface SortOptions {
-  clusterSensitivity: 'low' | 'medium' | 'high';
-  folderNamingStyle: 'simple' | 'descriptive' | 'detailed';
-  includeSubfolders: boolean;
+  cluster_sensitivity: 'low' | 'medium' | 'high';
+  folder_naming_style: 'simple' | 'descriptive' | 'detailed';
+  include_subfolders: boolean;
 }
 
 export interface SortResult {

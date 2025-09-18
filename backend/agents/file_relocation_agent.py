@@ -1,8 +1,8 @@
 import os
 import shutil
 from typing import Dict, List
-from core.models import ClusteredFile
-from core.utils import log_error
+from ..core.models import ClusteredFile
+from ..core.utils import log_error
 from .folder_naming_agent import FolderNamingAgent
 
 class FileRelocationAgent:
