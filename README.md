@@ -195,5 +195,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Contact
 
 **Tommy Parisi** - [GitHub](https://github.com/Tommy-Parisi)
+**My Website** - tommyparisi.com
 
 Project Link: [https://github.com/Tommy-Parisi/FileSorter](https://github.com/Tommy-Parisi/FileSorter)
