@@ -1,7 +1,7 @@
 <script lang="ts">
   import { open } from '@tauri-apps/plugin-dialog';
   import { open as openPath } from '@tauri-apps/plugin-shell';
-  import { runSorter, type SortOptions, type SortResult } from '../lib/backend';
+  import { runSorter, previewSort, type SortOptions, type SortResult, type PreviewResult } from '../lib/backend';
   import { theme } from '../lib/themeStore';
   import { onMount } from 'svelte';
   
@@ -26,6 +26,9 @@
     include_subfolders: true
   };
 
+  // Preview functionality
+  let previewResult: PreviewResult | null = null;
+  let isPreviewLoading = false;
   async function handleFolderSelect() {
     try {
       const picked = await open({ directory: true, multiple: false });
@@ -49,7 +52,7 @@
     try {
       sortResult = await runSorter(selectedFolder, sortOptions);
       showResults = true;
-      outputPath = selectedFolder + '_sorted'; // This should come from the backend response
+      outputPath = selectedFolder; // Files are organized within the same folder
       error = null;
     } catch (err) {
       console.error('Sorter error:', err);
@@ -73,7 +76,10 @@
         await openPath(outputPath);
       } catch (err) {
         console.error('Failed to open in finder:', err);
+        error = 'Failed to open folder in Finder. Please check if the folder exists.';
       }
+    } else {
+      error = 'No output folder path available.';
     }
   }
 
@@ -87,6 +93,27 @@
     clusteringMode = mode;
   }
 
+  // Preview sort functionality
+  async function handlePreviewSort() {
+    if (!selectedFolder) return;
+    
+    isPreviewLoading = true;
+    try {
+      previewResult = await previewSort(selectedFolder, sortOptions);
+      error = null;
+    } catch (err) {
+      console.error("Preview error:", err);
+      error = err instanceof Error ? err.message : "Failed to preview sort";
+      previewResult = null;
+    } finally {
+      isPreviewLoading = false;
+    }
+  }
+
+  // Update preview when folder or options change
+  $: if (selectedFolder && sortOptions) {
+    handlePreviewSort();
+  }
   // Handle drag and drop
   let isDragOver = false;
 
@@ -306,7 +333,25 @@
         </div>
       {/if}
 
-      <!-- Run Button -->
+
+      <!-- Preview Section -->
+      {#if selectedFolder}
+        <div class="preview-section">
+          {#if isPreviewLoading}
+            <div class="preview-loading">
+              <div class="loading-spinner"></div>
+              <span>Analyzing files...</span>
+            </div>
+          {:else if previewResult && previewResult.estimated_clusters > 0}
+            <div class="preview-result">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span class="preview-text">Preview: <strong>{previewResult.estimated_clusters}</strong> {previewResult.estimated_clusters === 1 ? "folder" : "folders"} will be created from <strong>{previewResult.files_found}</strong> files</span>
+            </div>
+          {/if}
+        </div>
+      {/if}      <!-- Run Button -->
       <div class="run-section">
         <button 
           class="run-button" 
@@ -321,9 +366,24 @@
 </main>
 
 <style>
+  @font-face {
+    font-family: 'Jacquard24';
+    src: url('/fonts/Jacquard_24/Jacquard24-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: 'Electrolize';
+    src: url('/fonts/Electrolize/Electrolize-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+  }
+
+
   :global(:root) {
-    --bg-primary: #e1e1ec;
-    --bg-secondary: #b9b5bb;
+    --bg-primary: #ECEDEC;
+    --bg-secondary: #E8E9E8;
     --text-primary: #1f2937;
     --text-secondary: #3C3C4390;
     --text-inverse: #000000;
@@ -348,7 +408,7 @@
   :global(body) {
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    font-family: 'Electrolize', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
@@ -375,7 +435,8 @@
   }
 
   .app-title {
-    font-size: 3rem;
+    font-family: 'Jacquard24', serif;
+    font-size: 5rem;
     font-weight: 700;
     margin: 0 0 0.5rem;
     letter-spacing: -0.02em;
@@ -622,24 +683,79 @@
     margin-top: 2rem;
   }
 
+  /* Preview Section */
+  .preview-section {
+    margin-bottom: 1.5rem;
+    text-align: center;
+  }
+
+  .preview-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .preview-result {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 8px;
+    color: #10b981;
+    font-size: 0.9rem;
+  }
+
+  .preview-result svg {
+    color: #10b981;
+  }
+
+  .preview-text {
+    color: var(--text-primary);
+  }
+
+  .preview-text strong {
+    color: #10b981;
+    font-weight: 600;
+  }
+
+  .loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color);
+    border-top: 2px solid var(--text-secondary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
   .run-button {
     background: var(--run-gradient);
     color: white;
     border: none;
     padding: 1rem 3rem;
     border-radius: 50px;
+    font-family: 'Electrolize', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 1.1rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(14, 181, 17, 0.5);
+    box-shadow: 0 4px 15px var(--shadow-medium);
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
   .run-button:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(14, 181, 17, 0.5);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
   }
 
   .run-button:disabled {
@@ -788,7 +904,7 @@
     }
 
     .app-title {
-      font-size: 2.5rem;
+      font-size: 3.5rem;
     }
 
     .tagline {

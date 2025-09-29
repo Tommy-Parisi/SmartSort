@@ -2,19 +2,21 @@
   import { onMount } from 'svelte';
   import DropZone from './components/DropZone.svelte';
   import SettingsPanel from './components/SettingsPanel.svelte';
-  import { runSorter, previewSort, type SortOptions } from './lib/backend';
+  import { runSorter, previewSort, type SortOptions, type PreviewResult, type SortResult } from './lib/backend';
   import { theme } from './lib/themeStore';
   
-  let previewCount = 0;
+  let previewResult: PreviewResult | null = null;
   let selectedFolder: string | null = null;
   let isProcessing = false;
+  let sortResult: SortResult | null = null;
   let error: string | null = null;
   let showFolderSuccess = false;
   
   let sortOptions: SortOptions = {
     cluster_sensitivity: 'medium',
     folder_naming_style: 'simple',
-    include_subfolders: true
+    include_subfolders: true,
+    dry_run: false
   };
 
   onMount(() => {
@@ -30,23 +32,24 @@
       showFolderSuccess = false;
     }, 100);
     
-    // Update preview count
+    // Update preview result
     previewSort(selectedFolder, sortOptions)
-      .then(count => {
-        previewCount = count;
+      .then(result => {
+        previewResult = result;
         error = null;
-        console.log('Preview count updated to:', previewCount);
+        console.log('Preview result updated:', previewResult);
         console.log('selectedFolder is now:', selectedFolder);
       })
       .catch(err => {
         error = err instanceof Error ? err.message : 'An error occurred';
-        previewCount = 0;
+        previewResult = null;
         console.error('Preview error:', err);
       });
   }
 
   async function handleFiles(event: CustomEvent<File[]>) {
-    previewCount = event.detail.length;
+    // This function might not be needed anymore with folder-based processing
+    console.log('Files selected:', event.detail.length);
   }
 
   async function handleRunSorter() {
@@ -54,9 +57,15 @@
     
     isProcessing = true;
     error = null;
+    sortResult = null;
     
     try {
-      await runSorter(selectedFolder, sortOptions);
+      const result = await runSorter(selectedFolder, sortOptions);
+      sortResult = result;
+      
+      if (result.status !== 'success') {
+        error = result.message;
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : 'An error occurred';
     } finally {
@@ -120,8 +129,10 @@
     {/if}
     
     <div class="action-bar">
-      {#if previewCount > 0}
-        <span class="preview-count">{previewCount} Clusters Previewed</span>
+      {#if previewResult && previewResult.status === 'success'}
+        <span class="preview-count">
+          {previewResult.files_found} files found, {previewResult.estimated_clusters} clusters estimated
+        </span>
       {/if}
       <button 
         class="run-button" 
@@ -141,6 +152,51 @@
     {#if selectedFolder}
       <p>isProcessing: {isProcessing ? 'true' : 'false'}</p>
       <p>selectedFolder: {selectedFolder}</p>
+      
+      {#if previewResult}
+        <div class="preview-details">
+          <h3>Preview Results</h3>
+          <p>{previewResult.message}</p>
+        </div>
+      {/if}
+      
+      {#if sortResult && sortResult.status === 'success'}
+        <div class="sort-results">
+          <h3>Sort Results</h3>
+          <p>{sortResult.message}</p>
+          <p>Progress: {sortResult.progress}% ({sortResult.stages_completed}/{sortResult.total_stages} stages)</p>
+          
+          {#if sortResult.folders_created.length > 0}
+            <div class="folders-created">
+              <h4>Folders Created:</h4>
+              <ul>
+                {#each sortResult.folders_created as folder}
+                  <li>
+                    <strong>{folder.name}</strong> ({folder.file_count} files)
+                    <ul>
+                      {#each folder.files as file}
+                        <li>{file}</li>
+                      {/each}
+                    </ul>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+          
+          {#if sortResult.stats}
+            <div class="stats">
+              <h4>Statistics:</h4>
+              <p>Files processed: {sortResult.stats.files_ingested}</p>
+              <p>Successfully extracted: {sortResult.stats.files_extracted}</p>
+              <p>Extraction failures: {sortResult.stats.extraction_failures}</p>
+              <p>Files embedded: {sortResult.stats.files_embedded}</p>
+              <p>Final clusters: {sortResult.stats.final_clusters}</p>
+              <p>Dry run: {sortResult.stats.dry_run ? 'Yes' : 'No'}</p>
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/if}
   </div>
 </main>
@@ -284,5 +340,36 @@
     border-radius: 4px;
     margin: 1rem 0;
     font-size: 0.9rem;
+  }
+
+  .preview-details,
+  .sort-results {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+  }
+
+  .preview-details h3,
+  .sort-results h3 {
+    margin-top: 0;
+    color: var(--accent-color);
+  }
+
+  .folders-created,
+  .stats {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .folders-created ul,
+  .stats {
+    margin: 0.5rem 0;
+  }
+
+  .folders-created li {
+    margin: 0.5rem 0;
   }
 </style>

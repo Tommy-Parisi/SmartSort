@@ -9,7 +9,8 @@ pub fn run() {
         commands::select_files,
         commands::select_folder,
         commands::preview_sort,
-        commands::run_sort
+        commands::run_sort,
+        commands::run_sort_with_progress
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
