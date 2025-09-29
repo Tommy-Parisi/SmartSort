@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer, util
 from collections import defaultdict
 from sklearn.metrics.pairwise import cosine_distances
 import hdbscan
+import sys
 
 class SemanticClusterer:
     def __init__(self, fallback_k_range=(2, 10), min_cluster_size=3):
@@ -14,7 +15,7 @@ class SemanticClusterer:
         self.min_cluster_size = min_cluster_size
 
     def cluster(self, X: np.ndarray) -> np.ndarray:
-        print("Trying HDBSCAN clustering...")
+        print("Trying HDBSCAN clustering...", file=sys.stderr)
         try:
             # Precompute cosine distance matrix
             distance_matrix = cosine_distances(X)
@@ -23,14 +24,14 @@ class SemanticClusterer:
             labels = hdb.fit_predict(distance_matrix)
 
             n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-            print(f"  HDBSCAN found {n_clusters} clusters")
+            print(f"  HDBSCAN found {n_clusters} clusters", file=sys.stderr)
 
             if n_clusters >= 2:
                 return labels
             else:
-                print("  HDBSCAN found fewer than 2 clusters. Falling back to Agglomerative clustering.")
+                print("  HDBSCAN found fewer than 2 clusters. Falling back to Agglomerative clustering.", file=sys.stderr)
         except Exception as e:
-            print(f"  HDBSCAN failed: {e}")
+            print(f"  HDBSCAN failed: {e}", file=sys.stderr)
             log_error(f"[SemanticClusterer] HDBSCAN failed: {e}")
 
         return self._fallback_agglomerative(X)
@@ -41,7 +42,7 @@ class SemanticClusterer:
         best_k = None
         best_labels = None
 
-        print(f"Testing fallback cluster counts from {self.fallback_k_range[0]} to {min(self.fallback_k_range[1], len(X))}")
+        print(f"Testing fallback cluster counts from {self.fallback_k_range[0]} to {min(self.fallback_k_range[1], len(X))}", file=sys.stderr)
 
         for k in range(self.fallback_k_range[0], min(self.fallback_k_range[1], len(X)) + 1):
             try:
@@ -49,24 +50,24 @@ class SemanticClusterer:
                 labels = model.fit_predict(X)
 
                 if len(set(labels)) == 1:
-                    print(f"  Skipped k={k} (only one cluster)")
+                    print(f"  Skipped k={k} (only one cluster)", file=sys.stderr)
                     continue
 
                 score = calinski_harabasz_score(X, labels)
-                print(f"  k={k} → Calinski-Harabasz Score: {score:.2f}")
+                print(f"  k={k} → Calinski-Harabasz Score: {score:.2f}", file=sys.stderr)
 
                 if score > best_score:
                     best_score = score
                     best_k = k
                     best_labels = labels
             except Exception as e:
-                print(f"  Error for k={k}: {e}")
+                print(f"  Error for k={k}: {e}", file=sys.stderr)
                 log_error(f"[SemanticClusterer] Agglomerative error for k={k}: {e}")
 
         if best_labels is None:
             raise ValueError("Could not determine optimal clustering with fallback.")
 
-        print(f"Best k selected: {best_k} with Calinski-Harabasz score {best_score:.2f}")
+        print(f"Best k selected: {best_k} with Calinski-Harabasz score {best_score:.2f}", file=sys.stderr)
         return best_labels
 
 

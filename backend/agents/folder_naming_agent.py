@@ -3,6 +3,7 @@ import re
 import json
 import math
 import hashlib
+import sys
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
 
@@ -223,7 +224,7 @@ class FolderNamingAgent:
                         json.dump(self.prompt_cache, f, indent=2)
 
                 labels[cluster_id] = label
-                print(f"Cluster {cluster_id}: {label}")
+                print(f"Cluster {cluster_id}: {label}", file=sys.stderr)
 
             except Exception as e:
                 log_error(f"[FolderNamingAgent] Failed to name cluster {cluster_id}: {e}")
