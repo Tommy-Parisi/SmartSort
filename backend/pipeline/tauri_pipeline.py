@@ -29,6 +29,7 @@ from backend.agents.clustering_agent import ClusteringAgent
 from backend.agents.folder_naming_agent import FolderNamingAgent
 from backend.agents.file_relocation_agent import FileRelocationAgent
 from backend.core.models import FileContent
+from backend.core.license import check_file_limit, activate, license_status
 from dotenv import load_dotenv
 import random
 
@@ -36,21 +37,25 @@ load_dotenv()
 
 
 def _stratified_sample(file_metas, max_files: int, seed: int = 42):
-    """Random stratified sample by detected_type, preserving type distribution."""
+    """Equal-per-type stratified sample — no single type can dominate the budget.
+
+    Types are processed smallest-first; any type that exhausts before its slot
+    allocation donates the remainder to the remaining types.
+    """
     if len(file_metas) <= max_files:
         return file_metas
     rng = random.Random(seed)
     by_type = defaultdict(list)
     for fm in file_metas:
         by_type[fm.detected_type].append(fm)
-    total = len(file_metas)
+    types = sorted(by_type.items(), key=lambda x: len(x[1]))
     result = []
-    for files in by_type.values():
-        n = max(1, round(len(files) / total * max_files))
-        n = min(n, len(files))
+    remaining = max_files
+    for i, (_, files) in enumerate(types):
+        types_left = len(types) - i
+        n = min(remaining // types_left, len(files))
         result.extend(rng.sample(files, n))
-    if len(result) > max_files:
-        result = rng.sample(result, max_files)
+        remaining -= n
     return result
 
 
@@ -144,6 +149,21 @@ class TauriPipeline:
             if max_files is not None and len(ingestor.file_meta_queue) > max_files:
                 ingestor.file_meta_queue = _stratified_sample(ingestor.file_meta_queue, max_files)
                 self.log_progress(1, f"Sampled {len(ingestor.file_meta_queue)} files (max={max_files})", 8)
+
+            # License check — trial mode caps at 500 files
+            license_check = check_file_limit(len(ingestor.file_meta_queue))
+            if not license_check["allowed"]:
+                self.results.update({
+                    "status": "trial_limit",
+                    "message": (
+                        f"Trial mode is limited to {license_check['limit']} files. "
+                        f"This folder has {license_check['count']} files. "
+                        "Upgrade to FileSort Pro for unlimited sorting."
+                    ),
+                    "trial_limit": license_check["limit"],
+                    "file_count": license_check["count"],
+                })
+                return self.results
 
             self.results["files_processed"] = len(ingestor.file_meta_queue)
 
@@ -317,15 +337,33 @@ class TauriPipeline:
 def main():
     """Command line interface for Tauri integration."""
     parser = argparse.ArgumentParser(description='Production Semantic File Sorter')
-    parser.add_argument('folder_path', help='Path to the folder to sort')
+    parser.add_argument('folder_path', nargs='?', help='Path to the folder to sort')
     parser.add_argument('--preview', action='store_true', 
                        help='Preview mode - estimate clusters without processing')
     parser.add_argument('--dry-run', action='store_true',
                        help='Run pipeline without actually moving files')
     parser.add_argument('--max-files', type=int, default=None,
                        help='Cap files with stratified sampling across file types')
+    parser.add_argument('--activate', metavar='LICENSE_KEY',
+                       help='Activate FileSort Pro with a license key')
+    parser.add_argument('--license-status', action='store_true',
+                       help='Print current license status and exit')
 
     args = parser.parse_args()
+
+    # License management commands (don't need a folder path)
+    if args.license_status:
+        print(json.dumps(license_status(), indent=2))
+        sys.exit(0)
+
+    if args.activate:
+        ok = activate(args.activate)
+        if ok:
+            print(json.dumps({"status": "activated", "message": "License activated. FileSort Pro is now unlimited."}))
+        else:
+            print(json.dumps({"status": "error", "message": "Invalid license key. Keys must be UUID4 format."}))
+            sys.exit(1)
+        sys.exit(0)
 
     try:
         pipeline = TauriPipeline(args.folder_path)

@@ -12,21 +12,25 @@ load_dotenv()
 
 
 def _stratified_sample(file_metas, max_files: int, seed: int = 42):
-    """Random stratified sample by detected_type, preserving type distribution."""
+    """Equal-per-type stratified sample — no single type can dominate the budget.
+
+    Types are processed smallest-first; any type that exhausts before its slot
+    allocation donates the remainder to the remaining types.
+    """
     if len(file_metas) <= max_files:
         return file_metas
     rng = random.Random(seed)
     by_type = defaultdict(list)
     for fm in file_metas:
         by_type[fm.detected_type].append(fm)
-    total = len(file_metas)
+    types = sorted(by_type.items(), key=lambda x: len(x[1]))
     result = []
-    for files in by_type.values():
-        n = max(1, round(len(files) / total * max_files))
-        n = min(n, len(files))
+    remaining = max_files
+    for i, (_, files) in enumerate(types):
+        types_left = len(types) - i
+        n = min(remaining // types_left, len(files))
         result.extend(rng.sample(files, n))
-    if len(result) > max_files:
-        result = rng.sample(result, max_files)
+        remaining -= n
     return result
 
 

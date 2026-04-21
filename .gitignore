@@ -42,6 +42,9 @@ frontend/src-tauri/icons/*.icns
 frontend/src-tauri/icons/StoreLogo.png
 frontend/src-tauri/icons/Square*.png
 
+# === Runtime cache ===
+folder_name_cache.json
+
 # === IDEs / Editors ===
 .vscode/
 .idea/

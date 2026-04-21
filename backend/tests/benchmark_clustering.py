@@ -18,6 +18,7 @@ Then prints cluster-level:
 import sys
 import time
 import argparse
+import random
 from pathlib import Path
 from collections import defaultdict
 
@@ -30,6 +31,26 @@ from backend.agents.ingestion_manager import IngestionManager
 from backend.agents.extractor_router import ExtractorRouter
 from backend.agents.embedding_agent import EmbeddingAgent
 from backend.agents.clustering_agent import ClusteringAgent
+from backend.agents.folder_naming_agent import FolderNamingAgent
+
+
+def _stratified_sample(file_metas, max_files: int, seed: int = 42):
+    """Equal-per-type stratified sample — no single type can dominate the budget."""
+    if len(file_metas) <= max_files:
+        return file_metas
+    rng = random.Random(seed)
+    by_type = defaultdict(list)
+    for fm in file_metas:
+        by_type[fm.detected_type].append(fm)
+    types = sorted(by_type.items(), key=lambda x: len(x[1]))
+    result = []
+    remaining = max_files
+    for i, (_, files) in enumerate(types):
+        types_left = len(types) - i
+        n = min(remaining // types_left, len(files))
+        result.extend(rng.sample(files, n))
+        remaining -= n
+    return result
 
 
 def _word_count(text: str) -> int:
@@ -44,7 +65,7 @@ def _raw_word_count(file_path: str) -> int:
         return 0
 
 
-def run_benchmark(folder_path: str) -> None:
+def run_benchmark(folder_path: str, max_files: int = None, show_all: bool = False) -> None:
     print(f"\n{'=' * 70}")
     print(f"  SmartSort Extraction Benchmark")
     print(f"  Folder: {folder_path}")
@@ -57,7 +78,12 @@ def run_benchmark(folder_path: str) -> None:
         print("No files found.")
         return
 
-    print(f"Files found: {len(ingestor.file_meta_queue)}\n")
+    total_found = len(ingestor.file_meta_queue)
+    if max_files is not None and total_found > max_files:
+        ingestor.file_meta_queue = _stratified_sample(ingestor.file_meta_queue, max_files)
+        print(f"Files found: {total_found}  →  sampled {len(ingestor.file_meta_queue)} (stratified, max={max_files})\n")
+    else:
+        print(f"Files found: {total_found}\n")
 
     router = ExtractorRouter()
     embedder = EmbeddingAgent()
@@ -100,6 +126,8 @@ def run_benchmark(folder_path: str) -> None:
             "compression": compression,
             "ms": ms,
             "status": content.status,
+            "embed_status": embedded.status,
+            "detected_type": fmeta.detected_type,
         })
         embedded_files.append(embedded)
 
@@ -113,6 +141,30 @@ def run_benchmark(folder_path: str) -> None:
         avg_ms = total_ms / len(file_stats)
         print(f"\nAverages — raw: {avg_raw:.0f} tok | extracted: {avg_ext:.0f} tok "
               f"| compression: {avg_comp:.1f}x | {avg_ms:.0f} ms/file")
+
+    # ── Embedding funnel by type ──────────────────────────────────────────────
+    print(f"\n{'=' * 70}")
+    print(f"  Embedding funnel by type")
+    print(f"{'=' * 70}")
+    by_type: dict = defaultdict(lambda: {"embedded": 0, "skipped": 0, "too_short": 0, "error": 0, "other": 0})
+    for s in file_stats:
+        bucket = s["embed_status"] if s["embed_status"] in ("embedded", "skipped", "too_short", "error") else "other"
+        by_type[s["detected_type"]][bucket] += 1
+    col_f = "{:<14} {:>8} {:>8} {:>10} {:>7}"
+    print(col_f.format("Type", "embedded", "skipped", "too_short", "error"))
+    print("-" * 52)
+    for dtype, counts in sorted(by_type.items()):
+        print(col_f.format(
+            dtype[:13],
+            counts["embedded"], counts["skipped"],
+            counts["too_short"], counts["error"],
+        ))
+    total_emb = sum(s["embed_status"] == "embedded" for s in file_stats)
+    total_skip = sum(s["embed_status"] == "skipped" for s in file_stats)
+    total_short = sum(s["embed_status"] == "too_short" for s in file_stats)
+    print("-" * 52)
+    print(col_f.format("TOTAL", total_emb, total_skip, total_short,
+                        sum(s["embed_status"] == "error" for s in file_stats)))
 
     # ── Clustering ────────────────────────────────────────────────────────────
     valid_emb = [e for e in embedded_files if e.status == "embedded" and e.embedding]
@@ -161,13 +213,70 @@ def run_benchmark(folder_path: str) -> None:
     for f in clustered:
         cluster_map[f.cluster_id].append(f)
 
-    print("\nCluster breakdown:")
-    for cid in sorted(cluster_map):
-        label = "NOISE" if cid == -1 else f"Cluster {cid:2d}"
-        files = cluster_map[cid]
-        names = ", ".join(f.file_meta.file_name for f in files[:4])
-        suffix = f" + {len(files) - 4} more" if len(files) > 4 else ""
-        print(f"  {label} ({len(files):3d} files)  {names}{suffix}")
+    # Top 20 non-noise clusters by size, then noise
+    non_noise = [(cid, files) for cid, files in cluster_map.items() if cid != -1]
+    non_noise.sort(key=lambda x: -len(x[1]))
+    noise_files = cluster_map.get(-1, [])
+
+    FLAG_THRESHOLD = 2
+    flagged = []
+
+    if show_all:
+        # Full dump: every cluster, every file
+        print(f"\n{'─' * 70}")
+        for cid, files in non_noise:
+            flag = " ⚑" if len(files) <= FLAG_THRESHOLD else ""
+            if flag:
+                flagged.append((cid, files))
+            print(f"\n  Cluster #{cid}  ({len(files)} files){flag}")
+            for f in files:
+                print(f"    {f.file_meta.file_name}")
+        if noise_files:
+            print(f"\n  NOISE  ({len(noise_files)} files)")
+            for f in noise_files:
+                print(f"    {f.file_meta.file_name}")
+        print(f"\n{'─' * 70}")
+    else:
+        col2 = "{:<12} {:>6}  {}"
+        print(f"\n{'─' * 70}")
+        print(col2.format("Cluster", "Files", "Sample filename"))
+        print(f"{'─' * 70}")
+
+        for cid, files in non_noise[:20]:
+            sample = files[0].file_meta.file_name
+            flag = " ⚑" if len(files) <= FLAG_THRESHOLD else ""
+            if flag:
+                flagged.append((cid, files))
+            print(col2.format(f"  #{cid}", len(files), sample[:55]) + flag)
+
+        if len(non_noise) > 20:
+            print(f"  … {len(non_noise) - 20} more clusters not shown")
+
+        if noise_files:
+            sample = noise_files[0].file_meta.file_name
+            print(col2.format("  NOISE", len(noise_files), sample[:55]))
+
+        print(f"{'─' * 70}")
+
+    if flagged:
+        print(f"\n⚑  Flagged ({len(flagged)} cluster(s) with ≤{FLAG_THRESHOLD} files — possible noise leakage):")
+        for cid, files in flagged:
+            names = ", ".join(f.file_meta.file_name for f in files)
+            print(f"   Cluster #{cid}: {names}")
+
+    # ── TF-IDF folder naming ──────────────────────────────────────────────────
+    print(f"\n{'=' * 70}")
+    print(f"  TF-IDF Folder Names (no API key)")
+    print(f"{'=' * 70}")
+    namer = FolderNamingAgent(use_llm_fallback=False)
+    folder_names = namer.name_clusters(cluster_map)
+    col3 = "{:<12} {:>6}  {}"
+    print(col3.format("Cluster", "Files", "Proposed folder name"))
+    print("-" * 55)
+    for cid, files in non_noise:
+        label = folder_names.get(cid, f"Cluster {cid}")
+        print(col3.format(f"  #{cid}", len(files), label))
+    print("-" * 55)
 
 
 if __name__ == "__main__":
@@ -178,5 +287,16 @@ if __name__ == "__main__":
         default="backend/tests/mixed_inputs",
         help="Folder to benchmark (default: backend/tests/mixed_inputs)",
     )
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        help="Cap files with stratified sampling across file types",
+    )
+    parser.add_argument(
+        "--show-all",
+        action="store_true",
+        help="Print every cluster and every file in it",
+    )
     args = parser.parse_args()
-    run_benchmark(args.folder)
+    run_benchmark(args.folder, max_files=args.max_files, show_all=args.show_all)

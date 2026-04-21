@@ -1,5 +1,6 @@
 from ..core.models import FileContent, EmbeddedFile
 from ..core.utils import log_error
+from ..core.constants import SKIP_EMBEDDING_TYPES, MIN_TOKENS_TO_EMBED
 
 _MAX_CHARS = 2000  # ~256 tokens for all-MiniLM-L6-v2; avoids tokenizing huge strings
 
@@ -46,8 +47,14 @@ class EmbeddingAgent:
         if file.status != "success":
             return EmbeddedFile(file_meta=file.file_meta, embedding=None, raw_text="", status="error")
 
+        # Media/archive types never produce meaningful cluster signal
+        if file.file_meta.detected_type in SKIP_EMBEDDING_TYPES:
+            return EmbeddedFile(file_meta=file.file_meta, embedding=None, raw_text="", status="skipped")
+
         text = file.raw_text.strip()[:_MAX_CHARS]
-        if len(text.split()) < 5:
+
+        # Near-empty extractions produce near-random embeddings that pollute clusters
+        if len(text.split()) < MIN_TOKENS_TO_EMBED:
             return EmbeddedFile(file_meta=file.file_meta, embedding=None, raw_text=text, status="too_short")
 
         try:

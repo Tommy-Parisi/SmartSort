@@ -1,5 +1,12 @@
 # core/constants.py
 
+# Types that never produce meaningful semantic signal — skip embedding entirely.
+# Files of these types go to an unsorted/ folder rather than entering clustering.
+SKIP_EMBEDDING_TYPES = {"video", "audio", "archive", "image"}
+
+# Files producing fewer than this many tokens after extraction get the same treatment.
+MIN_TOKENS_TO_EMBED = 5
+
 FILE_TYPE_MAP = {
     # Documents
     '.pdf': 'pdf',
