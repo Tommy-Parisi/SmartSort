@@ -14,3 +14,8 @@ def normalize_text(text: str) -> str:
     # Collapse whitespace and multiple newlines
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+def token_cap(text: str, max_tokens: int = 150) -> str:
+    """Truncate to approximately max_tokens using whitespace-split word count."""
+    words = text.split()
+    return " ".join(words[:max_tokens]) if len(words) > max_tokens else text

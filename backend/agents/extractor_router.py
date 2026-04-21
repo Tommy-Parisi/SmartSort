@@ -6,25 +6,33 @@ from .extractors import (
     TextExtractorAgent,
     OCRExtractorAgent,
     CodeExtractorAgent,
+    PptxExtractorAgent,
+    TabularExtractorAgent,
+    JSONExtractorAgent,
+    FallbackExtractorAgent,
 )
+
 
 class ExtractorRouter:
     def __init__(self):
+        _fallback = FallbackExtractorAgent()
         self.extractors = {
             "pdf": PDFExtractorAgent(),
             "docx": DocxExtractorAgent(),
             "text": TextExtractorAgent(),
             "image": OCRExtractorAgent(),
             "code": CodeExtractorAgent(),
+            "presentation": PptxExtractorAgent(),
+            "tabular": TabularExtractorAgent(),
+            "data": JSONExtractorAgent(),
+            "archive": _fallback,
+            "video": _fallback,
         }
+        self._fallback = _fallback
 
     def route(self, file_meta: FileMeta) -> FileContent:
         file_type = file_meta.detected_type
-        extractor = self.extractors.get(file_type)
-
-        if extractor is None:
-            log_error(f"[ExtractorRouter] No extractor found for type '{file_type}' ({file_meta.file_name})")
-            return FileContent(file_meta=file_meta, raw_text="", status="error")
+        extractor = self.extractors.get(file_type, self._fallback)
 
         try:
             raw_text = extractor.extract(file_meta.file_path)

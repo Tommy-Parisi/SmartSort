@@ -1,13 +1,13 @@
+import sys
+from collections import defaultdict
+
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import calinski_harabasz_score
+from sklearn.metrics.pairwise import cosine_distances
+
 from ..core.models import EmbeddedFile, ClusteredFile
 from ..core.utils import log_error
-from sentence_transformers import SentenceTransformer, util
-from collections import defaultdict
-from sklearn.metrics.pairwise import cosine_distances
-import hdbscan
-import sys
 
 class SemanticClusterer:
     def __init__(self, fallback_k_range=(2, 10), min_cluster_size=3):
@@ -20,6 +20,7 @@ class SemanticClusterer:
             # Precompute cosine distance matrix
             distance_matrix = cosine_distances(X)
 
+            import hdbscan
             hdb = hdbscan.HDBSCAN(metric='precomputed', min_cluster_size=self.min_cluster_size)
             labels = hdb.fit_predict(distance_matrix)
 
@@ -73,6 +74,7 @@ class SemanticClusterer:
 
 class ClusteringAgent:
     def __init__(self, fallback_k_range=(2, 10), min_cluster_size=3):
+        from sentence_transformers import SentenceTransformer
         self.name_embedder = SentenceTransformer("all-MiniLM-L6-v2")
         self.clusterer = SemanticClusterer(
             fallback_k_range=fallback_k_range,
@@ -109,12 +111,13 @@ class ClusteringAgent:
         self,
         cluster_map: dict[int, list[ClusteredFile]],
         cluster_names: dict[int, str],
-        similarity_threshold: float = 0.85
+        similarity_threshold: float = 0.75
         ) -> dict[int, list[ClusteredFile]]:
         sorted_ids = sorted(cluster_names.keys())
         folder_names = [cluster_names[i] for i in sorted_ids]
         embeddings = self.name_embedder.encode(folder_names, convert_to_tensor=True)
 
+        from sentence_transformers import util
         similarity_matrix = util.pytorch_cos_sim(embeddings, embeddings).cpu().numpy()
 
         parent = {i: i for i in range(len(sorted_ids))}

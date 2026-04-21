@@ -3,3 +3,7 @@ from .docx_extractor import DocxExtractorAgent
 from .text_extractor import TextExtractorAgent
 from .ocr_extractor import OCRExtractorAgent
 from .code_extractor import CodeExtractorAgent
+from .pptx_extractor import PptxExtractorAgent
+from .tabular_extractor import TabularExtractorAgent
+from .json_extractor import JSONExtractorAgent
+from .fallback_extractor import FallbackExtractorAgent
