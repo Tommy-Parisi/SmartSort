@@ -237,6 +237,13 @@ class FolderNamingAgent:
 
                     # 3. Filename-token fallback (no text needed)
                     if not label:
+                        sample_names = [f.file_meta.file_name for f in files[:3]]
+                        print(
+                            f"[FolderNamingAgent] cluster {cluster_id}: TF-IDF produced no label "
+                            f"(avg_tokens={avg_tokens:.1f}, ranked={len(ranked)}), "
+                            f"falling back to filename tokens. Sample files: {sample_names}",
+                            file=sys.stderr,
+                        )
                         label = _filename_fallback(files)
 
                     # 3. LLM last resort (optional, requires API key)
