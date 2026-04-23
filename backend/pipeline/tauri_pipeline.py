@@ -300,6 +300,198 @@ class TauriPipeline:
             })
             return self.results
 
+    # ── Streaming / event-driven mode ─────────────────────────────────────
+
+    def _emit(self, event: str, payload: dict) -> None:
+        """Write a single NDJSON event line to stdout and flush immediately."""
+        print(json.dumps({"event": event, "payload": payload}), flush=True)
+
+    def run_streaming_pipeline(self, dry_run: bool = False, max_files: int = None) -> None:
+        """Run the pipeline and emit NDJSON events to stdout for Tauri to consume.
+
+        Unlike run_full_pipeline(), this method does NOT return a final JSON blob.
+        Everything is communicated via _emit() calls.
+        """
+        try:
+            # 1. Ingestion
+            ingestor = IngestionManager(str(self.input_folder))
+            ingestor.scan()
+
+            if not ingestor.file_meta_queue:
+                self._emit("sort-complete", {
+                    "folders_created": 0,
+                    "files_sorted": 0,
+                    "files_unsorted": 0,
+                    "folder_tree": {"folders": []}
+                })
+                return
+
+            if max_files is not None and len(ingestor.file_meta_queue) > max_files:
+                ingestor.file_meta_queue = _stratified_sample(ingestor.file_meta_queue, max_files)
+
+            # License check
+            license_check = check_file_limit(len(ingestor.file_meta_queue))
+            if not license_check["allowed"]:
+                self._emit("sort-error", {
+                    "code": "trial_limit",
+                    "message": (
+                        f"trial_limit: folder contains {license_check['count']} files, "
+                        f"trial limit is {license_check['limit']}."
+                    ),
+                    "trial_limit": license_check["limit"],
+                    "file_count": license_check["count"],
+                })
+                return
+
+            files_total = len(ingestor.file_meta_queue)
+
+            # 2. Extraction — emit per-file progress
+            router = ExtractorRouter()
+            extracted = []
+            for i, fmeta in enumerate(ingestor.file_meta_queue):
+                content: FileContent = router.route(fmeta)
+                extracted.append(content)
+                self._emit("file-assigned", {
+                    "filename": fmeta.file_name,
+                    "cluster_id": -1,
+                    "folder_name": "",
+                    "files_processed": i + 1,
+                    "files_total": files_total,
+                    "stage": "extracting",
+                })
+
+            success_count = sum(1 for f in extracted if f.status == "success")
+            fail_count = len(extracted) - success_count
+
+            if success_count == 0:
+                self._emit("sort-error", {"message": "No files could be extracted."})
+                return
+
+            # 3. Embedding — emit per-file progress
+            embedder = EmbeddingAgent()
+            embedded = []
+            for i, extracted_file in enumerate(extracted):
+                embedded_file = embedder.embed(extracted_file)
+                embedded.append(embedded_file)
+                self._emit("file-assigned", {
+                    "filename": extracted_file.file_meta.file_name,
+                    "cluster_id": -1,
+                    "folder_name": "",
+                    "files_processed": i + 1,
+                    "files_total": files_total,
+                    "stage": "embedding",
+                })
+
+            embedded_count = len([e for e in embedded if e.status == "embedded"])
+            if embedded_count < 2:
+                self._emit("sort-error", {"message": "Not enough files could be embedded for clustering."})
+                return
+
+            # 4. Clustering (batch — no per-file events, just the result)
+            clusterer = ClusteringAgent(fallback_k_range=(2, 10), min_cluster_size=2)
+            clustered = clusterer.cluster(embedded)
+
+            if not clustered:
+                self._emit("sort-error", {"message": "Clustering failed."})
+                return
+
+            cluster_map = defaultdict(list)
+            for f in clustered:
+                cluster_map[f.cluster_id].append(f)
+
+            # 5. Folder Naming
+            naming_agent = FolderNamingAgent()
+            folder_names = naming_agent.name_clusters(cluster_map)
+            cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
+            folder_names = naming_agent.name_clusters(cluster_map)
+
+            # Emit folder-discovered for each cluster
+            for cluster_id, files in sorted(cluster_map.items()):
+                if cluster_id == -1:
+                    continue
+                folder_name = folder_names.get(cluster_id, f"cluster_{cluster_id}")
+                self._emit("folder-discovered", {
+                    "cluster_id": cluster_id,
+                    "folder_name": folder_name,
+                    "estimated_capacity": len(files),
+                })
+
+            # Emit file-assigned (naming stage) for each assigned file
+            for i, f in enumerate(clustered):
+                if f.cluster_id == -1:
+                    continue
+                folder_name = folder_names.get(f.cluster_id, f"cluster_{f.cluster_id}")
+                self._emit("file-assigned", {
+                    "filename": f.file_meta.file_name,
+                    "cluster_id": f.cluster_id,
+                    "folder_name": folder_name,
+                    "files_processed": i + 1,
+                    "files_total": files_total,
+                    "stage": "naming",
+                })
+
+            # Build folder tree for the complete event
+            unsorted_count = sum(1 for f in clustered if f.cluster_id == -1)
+            sorted_count = len(clustered) - unsorted_count
+
+            folder_tree_entries = []
+            for cluster_id, files in sorted(cluster_map.items()):
+                if cluster_id == -1:
+                    continue
+                folder_name = folder_names.get(cluster_id, f"cluster_{cluster_id}")
+                file_entries = []
+                for f in files:
+                    ext = Path(f.file_meta.file_name).suffix.lstrip('.')
+                    file_entries.append({"name": f.file_meta.file_name, "extension": ext})
+                folder_tree_entries.append({
+                    "cluster_id": cluster_id,
+                    "folder_name": folder_name,
+                    "files": file_entries,
+                })
+
+            # 6. File Relocation — emit per-file placing events
+            if not dry_run:
+                relocation_agent = FileRelocationAgent(
+                    base_destination_dir=str(self.input_folder),
+                    dry_run=False
+                )
+                relocation_results = relocation_agent.relocate_files(cluster_map)
+
+                for i, entry in enumerate(folder_tree_entries):
+                    for j, file_entry in enumerate(entry["files"]):
+                        self._emit("file-assigned", {
+                            "filename": file_entry["name"],
+                            "cluster_id": entry["cluster_id"],
+                            "folder_name": entry["folder_name"],
+                            "files_processed": j + 1,
+                            "files_total": len(entry["files"]),
+                            "stage": "placing",
+                        })
+
+                self._persist_index(cluster_map, folder_names)
+            else:
+                # Dry run: emit placing events without actually moving
+                for entry in folder_tree_entries:
+                    for j, file_entry in enumerate(entry["files"]):
+                        self._emit("file-assigned", {
+                            "filename": file_entry["name"],
+                            "cluster_id": entry["cluster_id"],
+                            "folder_name": entry["folder_name"],
+                            "files_processed": j + 1,
+                            "files_total": len(entry["files"]),
+                            "stage": "placing",
+                        })
+
+            self._emit("sort-complete", {
+                "folders_created": len(folder_tree_entries),
+                "files_sorted": sorted_count,
+                "files_unsorted": unsorted_count,
+                "folder_tree": {"folders": folder_tree_entries},
+            })
+
+        except Exception as e:
+            self._emit("sort-error", {"message": f"Pipeline failed: {str(e)}"})
+
     def _persist_index(self, cluster_map: dict, folder_names: dict) -> None:
         """Build and save the faiss index using post-relocation file paths."""
         try:
@@ -334,26 +526,168 @@ class TauriPipeline:
             self.results["errors"].append(f"Index persistence failed: {exc}")
 
 
+def apply_preview(base_folder: str, preview_folders: list) -> dict:
+    """Apply user-edited preview assignments to disk and log moves for undo."""
+    import shutil
+    from datetime import datetime, timezone
+
+    base = Path(base_folder)
+    smartsort_dir = Path.home() / ".smartsort"
+    smartsort_dir.mkdir(parents=True, exist_ok=True)
+    move_log = smartsort_dir / "move_log.jsonl"
+
+    moved = 0
+    errors = []
+
+    for folder in preview_folders:
+        folder_name = (folder.get("name") or "").strip()
+        files = folder.get("files") or []
+        if not folder_name or not files:
+            continue
+
+        dest_dir = base / folder_name
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            errors.append(f"Cannot create '{dest_dir}': {exc}")
+            continue
+
+        for file in files:
+            filename = (file.get("filename") or "").strip()
+            if not filename:
+                continue
+            src = base / filename
+            if not src.exists():
+                errors.append(f"File not found: {src}")
+                continue
+
+            dest = dest_dir / filename
+            if dest.exists():
+                stem, suffix = src.stem, src.suffix
+                i = 1
+                while dest.exists():
+                    dest = dest_dir / f"{stem}_{i}{suffix}"
+                    i += 1
+
+            try:
+                shutil.move(str(src), str(dest))
+                moved += 1
+                entry = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": str(src),
+                    "destination": str(dest),
+                    "cluster_id": folder.get("cluster_id", -1),
+                    "similarity": 1.0,
+                }
+                with open(move_log, "a") as f:
+                    f.write(json.dumps(entry) + "\n")
+            except Exception as exc:
+                errors.append(f"Failed to move '{src}': {exc}")
+
+    return {"status": "done", "moved": moved, "errors": errors}
+
+
+def undo_last_sort() -> dict:
+    """Reverse all moves recorded in move_log.jsonl, then clear the log."""
+    import shutil
+
+    move_log = Path.home() / ".smartsort" / "move_log.jsonl"
+    if not move_log.exists():
+        return {"status": "done", "reversed": 0, "errors": []}
+
+    entries = []
+    with open(move_log) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+    reversed_count = 0
+    errors = []
+    for entry in reversed(entries):
+        src = entry.get("destination", "")
+        dst = entry.get("source", "")
+        if not src or not dst:
+            continue
+        try:
+            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(src, dst)
+            reversed_count += 1
+        except Exception as exc:
+            errors.append(f"Failed to reverse '{src}' → '{dst}': {exc}")
+
+    move_log.unlink(missing_ok=True)
+    return {"status": "done", "reversed": reversed_count, "errors": errors}
+
+
 def main():
     """Command line interface for Tauri integration."""
     parser = argparse.ArgumentParser(description='Production Semantic File Sorter')
     parser.add_argument('folder_path', nargs='?', help='Path to the folder to sort')
-    parser.add_argument('--preview', action='store_true', 
+    parser.add_argument('--preview', action='store_true',
                        help='Preview mode - estimate clusters without processing')
     parser.add_argument('--dry-run', action='store_true',
                        help='Run pipeline without actually moving files')
+    parser.add_argument('--stream-events', action='store_true',
+                       help='Emit NDJSON events to stdout during processing (for Tauri)')
     parser.add_argument('--max-files', type=int, default=None,
                        help='Cap files with stratified sampling across file types')
     parser.add_argument('--activate', metavar='LICENSE_KEY',
                        help='Activate FileSort Pro with a license key')
     parser.add_argument('--license-status', action='store_true',
                        help='Print current license status and exit')
+    parser.add_argument('--undo', action='store_true',
+                       help='Undo the last sort by reversing move_log.jsonl')
+    parser.add_argument('--apply-preview', action='store_true',
+                       help='Apply user-confirmed preview assignments to disk')
+    parser.add_argument('--base-folder', metavar='PATH',
+                       help='Base folder for --apply-preview')
+    parser.add_argument('--preview-json', metavar='JSON',
+                       help='JSON array of preview folders for --apply-preview')
+    parser.add_argument('--daemon-status', action='store_true',
+                       help='Print daemon status as JSON and exit')
+    parser.add_argument('--start-daemon', metavar='FOLDERS_JSON',
+                       help='Start the watch daemon for the given JSON array of folders')
+    parser.add_argument('--stop-daemon', action='store_true',
+                       help='Stop the running watch daemon')
 
     args = parser.parse_args()
 
-    # License management commands (don't need a folder path)
+    # ── Daemon management ─────────────────────────────────────────────────────
+    if args.daemon_status:
+        try:
+            from backend.daemon.watcher import get_daemon_status
+            print(json.dumps(get_daemon_status()))
+        except Exception as e:
+            print(json.dumps({"running": False, "watchedFolders": [], "recentActivity": []}))
+        sys.exit(0)
+
+    if args.start_daemon:
+        try:
+            folders = json.loads(args.start_daemon)
+            from backend.daemon.watcher import start_daemon
+            start_daemon(folders)
+            print(json.dumps({"status": "started"}))
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+            sys.exit(1)
+        sys.exit(0)
+
+    if args.stop_daemon:
+        try:
+            from backend.daemon.watcher import stop_daemon
+            stop_daemon()
+            print(json.dumps({"status": "stopped"}))
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+        sys.exit(0)
+
+    # ── License management ────────────────────────────────────────────────────
     if args.license_status:
-        print(json.dumps(license_status(), indent=2))
+        print(json.dumps(license_status()))
         sys.exit(0)
 
     if args.activate:
@@ -365,17 +699,44 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
+    if args.undo:
+        try:
+            result = undo_last_sort()
+            print(json.dumps(result))
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+            sys.exit(1)
+        sys.exit(0)
+
+    if args.apply_preview:
+        if not args.base_folder or not args.preview_json:
+            print(json.dumps({"status": "error", "message": "--base-folder and --preview-json are required"}))
+            sys.exit(1)
+        try:
+            folders = json.loads(args.preview_json)
+            result = apply_preview(args.base_folder, folders)
+            print(json.dumps(result))
+            if result["errors"] and result["moved"] == 0:
+                sys.exit(1)
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+            sys.exit(1)
+        sys.exit(0)
+
+    # ── Pipeline ──────────────────────────────────────────────────────────────
     try:
         pipeline = TauriPipeline(args.folder_path)
 
-        if args.preview:
+        if args.stream_events:
+            # Streaming mode: emit NDJSON events to stdout, no final JSON blob
+            pipeline.run_streaming_pipeline(dry_run=args.dry_run, max_files=args.max_files)
+        elif args.preview:
             result = pipeline.preview_clusters()
+            print(json.dumps(result, indent=2))
         else:
             result = pipeline.run_full_pipeline(dry_run=args.dry_run, max_files=args.max_files)
-        
-        # Output JSON for Tauri to consume
-        print(json.dumps(result, indent=2))
-        
+            print(json.dumps(result, indent=2))
+
     except Exception as e:
         error_result = {
             "status": "error",

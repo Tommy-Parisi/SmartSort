@@ -58,18 +58,27 @@ export interface FileAssignment {
   folder_name: string;
 }
 
-export const tauriConfirmSort = (previewFolders: PreviewFolder[]) =>
-  invoke<void>('confirm_sort', { previewFolders });
+export const tauriConfirmSort = (baseFolder: string, previewFolders: PreviewFolder[]) =>
+  invoke<void>('confirm_sort', { baseFolder, previewFolders });
 
 export const tauriReassignFiles = (
   filenames: string[],
   excludeClusterId: number,
 ) => invoke<FileAssignment[]>('reassign_files', { filenames, excludeClusterId });
+export const tauriUndoSort = () =>
+  invoke<void>('undo_sort');
 
-export const tauriUndoSort = () => invoke<void>('undo_sort');
+export interface FilePreview {
+  data: string;
+  mime_type: string;
+}
+
+export const tauriGetFilePreview = (filePath: string) =>
+  invoke<FilePreview>('get_file_preview', { filePath });
 
 export const tauriGetDaemonStatus = () =>
-  invoke<DaemonStatus>('get_daemon_status');
+  invoke<any>('get_daemon_status');
+
 
 export const tauriStartDaemon = (folders: string[]) =>
   invoke<void>('start_daemon', { folders });

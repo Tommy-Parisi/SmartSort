@@ -25,35 +25,106 @@ pub struct PipelineProgress {
     errors: Vec<String>,
 }
 
-fn get_python_executable() -> String {
-    let project_root = std::env::current_dir()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("backend")
-        .join("fileSortVenv");
+fn home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    { std::env::var("USERPROFILE").ok().map(std::path::PathBuf::from) }
+    #[cfg(not(target_os = "windows"))]
+    { std::env::var("HOME").ok().map(std::path::PathBuf::from) }
+}
 
-    let python_path = if cfg!(target_os = "windows") {
-        project_root.join("Scripts").join("python.exe")
+fn python_in_venv(venv: &std::path::Path) -> std::path::PathBuf {
+    if cfg!(target_os = "windows") {
+        venv.join("Scripts").join("python.exe")
     } else {
-        project_root.join("bin").join("python")
-    };
+        venv.join("bin").join("python")
+    }
+}
 
-    python_path.to_string_lossy().to_string()
+// Returns the exe path, resolving symlinks so we get the real binary location.
+fn real_exe() -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok().and_then(|p| std::fs::canonicalize(p).ok())
+}
+
+fn get_python_executable() -> String {
+    // 1. Explicit override — useful for testing or non-standard setups.
+    if let Ok(p) = std::env::var("SMARTSORT_PYTHON") {
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
+
+    // 2. User-level venv created by the installer (~/.smartsort/venv).
+    //    This is the expected location in a packaged app.
+    if let Some(home) = home_dir() {
+        let p = python_in_venv(&home.join(".smartsort").join("venv"));
+        if p.exists() {
+            return p.to_string_lossy().to_string();
+        }
+    }
+
+    // 3. Dev venv: resolve from the real exe path.
+    //    In dev the binary is at <project>/frontend/src-tauri/target/{debug|release}/<name>
+    //    Going up 4 parents reaches the project root, then into backend/fileSortVenv.
+    if let Some(exe) = real_exe() {
+        if let Some(venv) = exe.parent()       // {debug|release}/
+            .and_then(|p| p.parent())          // target/
+            .and_then(|p| p.parent())          // src-tauri/
+            .and_then(|p| p.parent())          // frontend/
+            .and_then(|p| p.parent())          // project root
+            .map(|root| root.join("backend").join("fileSortVenv"))
+        {
+            let p = python_in_venv(&venv);
+            if p.exists() {
+                return p.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // 4. Last resort — system python3.
+    "python3".to_string()
 }
 
 fn get_backend_dir() -> String {
-    let backend_dir = std::env::current_dir()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("backend");
+    // 1. Explicit override.
+    if let Ok(p) = std::env::var("SMARTSORT_BACKEND") {
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
 
-    backend_dir.to_string_lossy().to_string()
+    if let Some(exe) = real_exe() {
+        // 2. Bundled app resources: <app>.app/Contents/MacOS/<binary>
+        //    Resources live at <app>.app/Contents/Resources/backend
+        if let Some(bundle_backend) = exe.parent()   // MacOS/
+            .and_then(|p| p.parent())                // Contents/
+            .map(|p| p.join("Resources").join("backend"))
+        {
+            if bundle_backend.join("pipeline").exists() {
+                return bundle_backend.to_string_lossy().to_string();
+            }
+        }
+
+        // 3. Dev path: project root / backend
+        if let Some(dev_backend) = exe.parent()    // {debug|release}/
+            .and_then(|p| p.parent())              // target/
+            .and_then(|p| p.parent())              // src-tauri/
+            .and_then(|p| p.parent())              // frontend/
+            .and_then(|p| p.parent())              // project root
+            .map(|root| root.join("backend"))
+        {
+            if dev_backend.exists() {
+                return dev_backend.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // 4. Original cwd-relative fallback (keeps old dev behaviour if above fails).
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| d.parent().and_then(|p| p.parent().map(|pp| pp.join("backend"))))
+        .unwrap_or_else(|| std::path::PathBuf::from("backend"))
+        .to_string_lossy()
+        .to_string()
 }
 
 // ── New event-streaming pipeline command ────────────────────────────────────
@@ -78,7 +149,6 @@ pub async fn start_sort(
             .arg("--stream-events")
             .arg(&folder_path)
             .current_dir(&backend_dir)
-            .env("SMARTSORT_DEV", "1")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
@@ -159,9 +229,50 @@ pub struct FileAssignment {
 }
 
 #[tauri::command]
-pub async fn confirm_sort(preview_folders: Vec<Value>) -> Result<(), String> {
-    info!("confirm_sort called with {} folders", preview_folders.len());
-    // TODO: apply preview_folders to disk via Python
+pub async fn confirm_sort(base_folder: String, preview_folders: Vec<Value>) -> Result<(), String> {
+    info!("confirm_sort called: {} folders, base={}", preview_folders.len(), base_folder);
+
+    let python_exe = get_python_executable();
+    let backend_dir = get_backend_dir();
+
+    let preview_json = serde_json::to_string(&preview_folders)
+        .map_err(|e| format!("Failed to serialize preview: {}", e))?;
+
+    let output = Command::new(&python_exe)
+        .args(["-m", "backend.pipeline.tauri_pipeline"])
+        .arg("--apply-preview")
+        .arg("--base-folder")
+        .arg(&base_folder)
+        .arg("--preview-json")
+        .arg(&preview_json)
+        .current_dir(&backend_dir)
+        .output()
+        .map_err(|e| format!("Failed to run apply_preview: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("apply_preview failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse result: {}", e))?;
+
+    if result.get("status").and_then(|s| s.as_str()) == Some("error") {
+        let msg = result.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+
+    if let Some(errors) = result.get("errors").and_then(|e| e.as_array()) {
+        if !errors.is_empty() {
+            let moved = result.get("moved").and_then(|m| m.as_u64()).unwrap_or(0);
+            if moved == 0 {
+                return Err(format!("{} error(s), nothing moved", errors.len()));
+            }
+            error!("confirm_sort partial: {} error(s), {} moved", errors.len(), moved);
+        }
+    }
+
     Ok(())
 }
 
@@ -389,6 +500,49 @@ pub async fn preview_sort(folder_path: String, _options: Option<SortOptions>) ->
 
     serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
         .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FilePreview {
+    pub data: String,
+    pub mime_type: String,
+}
+
+#[tauri::command]
+pub async fn get_file_preview(file_path: String) -> Result<FilePreview, String> {
+    info!("get_file_preview called for: {}", file_path);
+    use std::io::Read;
+    use base64::{Engine as _, engine::general_purpose};
+
+    let path = std::path::Path::new(&file_path);
+    let ext = path.extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let mut file = std::fs::File::open(&file_path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    
+    // For images, we might want the whole thing if it's small, or just a chunk.
+    // For now, let's read up to 1MB for preview.
+    let mut buffer = Vec::new();
+    let _ = file.take(1_000_000).read_to_end(&mut buffer)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let mime_type = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "pdf" => "application/pdf",
+        "txt" | "md" | "js" | "ts" | "py" | "json" | "rs" | "css" | "html" | "jsx" | "tsx" | "csv" | "sh" | "yaml" | "yml" => "text/plain",
+        _ => "application/octet-stream",
+    };
+
+    Ok(FilePreview {
+        data: general_purpose::STANDARD.encode(&buffer),
+        mime_type: mime_type.to_string(),
+    })
 }
 
 #[tauri::command]

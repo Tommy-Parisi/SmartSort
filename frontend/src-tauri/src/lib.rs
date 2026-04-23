@@ -22,6 +22,7 @@ pub fn run() {
             commands::select_files,
             commands::select_folder,
             commands::preview_sort,
+            commands::get_file_preview,
             commands::run_sort,
         ])
         .setup(|app| {

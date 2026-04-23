@@ -26,4 +26,5 @@ tauri-plugin-dialog = "2.4"
 tauri-plugin-fs = "2.4"
 tauri-plugin-log = "2.7.0"
 tauri-plugin-shell = "2.3.1"
-tokio = { version = "1.0", features = ["rt", "macros"] }
+base64 = "0.22.1"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "process", "io-util"] }

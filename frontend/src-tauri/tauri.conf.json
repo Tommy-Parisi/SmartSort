@@ -1,5 +1,5 @@
 {
-  "productName": "FileSort",
+  "productName": "Smart Sort",
   "version": "0.1.0",
   "identifier": "com.filesort.app",
   "build": {
@@ -9,13 +9,20 @@
   "app": {
     "windows": [
       {
-        "title": "FileSort",
-        "width": 400,
-        "height": 600
+        "title": "Smart Sort",
+        "width": 900,
+        "height": 700
       }
     ]
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "resources": {
+      "../../backend/agents/*.py":   "backend/agents/",
+      "../../backend/core/*.py":     "backend/core/",
+      "../../backend/pipeline/*.py": "backend/pipeline/",
+      "../../backend/daemon/*.py":   "backend/daemon/",
+      "../../backend/__init__.py":   "backend/"
+    }
   }
 }
