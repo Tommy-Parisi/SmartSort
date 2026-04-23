@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { goto, beforeNavigate } from '$app/navigation';
   import Logo from '$lib/components/Logo.svelte';
   import ParticleCanvas from '$lib/components/ParticleCanvas.svelte';
   import { sortStore } from '$lib/stores/sort';
@@ -34,12 +34,22 @@
   let filesPlaced  = 0;
   let estETA       = '–';
 
+  let sortRunning = false;
+
   // Error states
   let errorMessage   = '';
   let showTrialModal = false;
   let licenseKey     = '';
   let activateError  = '';
   let activating     = false;
+
+  beforeNavigate(({ cancel }) => {
+    if (sortRunning) {
+      if (!confirm('Your sort is in progress. Going back will cancel it — files may be partially moved. Are you sure?')) {
+        cancel();
+      }
+    }
+  });
 
   // Rolling 10-second rate buffer for ETA
   const rateBuffer: number[] = [];
@@ -102,6 +112,7 @@
     }));
 
     unlisteners.push(await onSortComplete((e: SortCompleteEvent) => {
+      sortRunning = false;
       sortStore.update(s => ({
         ...s,
         folderTree:     e.folder_tree,
@@ -114,6 +125,7 @@
     }));
 
     unlisteners.push(await onSortError((e: SortErrorEvent) => {
+      sortRunning = false;
       if (e.code === 'trial_limit') {
         showTrialModal = true;
       } else {
@@ -122,6 +134,7 @@
     }));
 
     // Start the pipeline after all listeners are registered
+    sortRunning = true;
     tauriStartSort(store.selectedFolder, store.watchMode, store.previewMode)
       .catch(e => console.error('start_sort failed:', e));
   });
@@ -151,6 +164,7 @@
   }
 
   function cancel() {
+    sortRunning = false;
     goto('/');
   }
 </script>
@@ -195,7 +209,7 @@
     <div class="modal">
       <p class="modal-title">You've hit the trial limit</p>
       <p class="modal-sub">
-        Smart Sort trial sorts up to 500 files. Your folder has more.
+        Smart Sort trial sorts up to 100 files. Your folder has more.
         Unlock unlimited sorting with a license key.
       </p>
 

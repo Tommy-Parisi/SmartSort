@@ -9,8 +9,8 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
-    "moduleResolution": "node",
     "types": ["@tauri-apps/api"]
   },
-  "include": ["src", "src-tauri", "vite.config.ts"]
+  "include": [".svelte-kit/ambient.d.ts", ".svelte-kit/non-ambient.d.ts", ".svelte-kit/types/**/$types.d.ts", "src", "vite.config.ts"],
+  "exclude": ["src-tauri"]
 }
