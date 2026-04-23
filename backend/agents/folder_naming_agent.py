@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple
 
 from ..core.models import ClusteredFile
 from ..core.utils import log_error
+from .identity_utils import clean_filename
 
 CACHE_PATH = "folder_name_cache.json"
 
@@ -27,6 +28,32 @@ UNSAFE_FS_CHARS = r'[:<>"/\\|?*\n\r\t]'
 _TOO_GENERIC = {
     "document","notes","file","draft","final","copy","new","updated","version",
     "untitled","unnamed","sample","test","temp","tmp","data","backup","old",
+}
+
+ALWAYS_STRIP = {
+    "google", "docs", "sheets", "slides", "microsoft", "word",
+    "pdf", "docx", "file", "document", "new", "copy", "final",
+    "draft", "version", "untitled", "readme", "index", "main",
+}
+
+EXTENSION_LABELS = {
+    "pdf": "documents",
+    "doc": "documents",
+    "docx": "documents",
+    "txt": "documents",
+    "md": "documents",
+    "markdown": "documents",
+    "rst": "documents",
+    "ppt": "slides",
+    "pptx": "slides",
+    "csv": "sheets",
+    "xls": "sheets",
+    "xlsx": "sheets",
+    "jpg": "images",
+    "jpeg": "images",
+    "png": "images",
+    "heic": "images",
+    "heif": "images",
 }
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[''][A-Za-z0-9]+)?")
@@ -54,11 +81,16 @@ def _sanitize_label(label: str, max_words: int = 4, max_len: int = 60) -> str:
 
 def _extract_text_fields(f: ClusteredFile) -> Tuple[str, str]:
     """Return (filename_stem, extracted_body) for TF-IDF scoring."""
-    stem = os.path.splitext(f.file_meta.file_name)[0]
+    stem = clean_filename(os.path.splitext(f.file_meta.file_name)[0])
     # Normalise separators so "canvas_calendar_doc" → individual tokens
     stem = re.sub(r"[_\-.]", " ", stem)
     body = (f.raw_text or "").strip()
     return stem, body
+
+
+def _clean_filename_stem(file_name: str) -> str:
+    stem = clean_filename(os.path.splitext(file_name)[0])
+    return re.sub(r"[_\-.]", " ", stem)
 
 
 def _tokens(text: str) -> List[str]:
@@ -77,6 +109,42 @@ def _tokens(text: str) -> List[str]:
 
 def _ngrams(tokens: List[str], n: int) -> List[Tuple[str, ...]]:
     return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+
+def is_filename_proper_noun(token: str, filenames: List[str]) -> bool:
+    appearances = 0
+    capitalized_match = False
+    token_lower = token.lower()
+    for filename in filenames:
+        parts = re.findall(r"[A-Za-z0-9]+", filename)
+        if any(part.lower() == token_lower for part in parts):
+            appearances += 1
+            if any(part.lower() == token_lower and part[:1].isupper() for part in parts):
+                capitalized_match = True
+    return appearances == 1 and capitalized_match
+
+
+def _strip_label_noise(words: List[str], filenames: List[str]) -> List[str]:
+    cleaned: List[str] = []
+    for word in words:
+        if word.lower() in ALWAYS_STRIP:
+            continue
+        if is_filename_proper_noun(word, filenames):
+            continue
+        cleaned.append(word)
+    return cleaned
+
+
+def _dominant_extension(files: List[ClusteredFile]) -> str:
+    extensions = [
+        os.path.splitext(f.file_meta.file_name)[1].lstrip(".").lower()
+        for f in files
+        if os.path.splitext(f.file_meta.file_name)[1]
+    ]
+    if not extensions:
+        return "files"
+    dominant = Counter(extensions).most_common(1)[0][0]
+    return EXTENSION_LABELS.get(dominant, dominant)
 
 
 def _score_candidates(examples: List[ClusteredFile]) -> List[Tuple[Tuple[str, ...], float]]:
@@ -135,7 +203,8 @@ def _score_candidates(examples: List[ClusteredFile]) -> List[Tuple[Tuple[str, ..
     return ranked
 
 
-def _choose_label_from_ranked(ranked: List[Tuple[Tuple[str, ...], float]]) -> str:
+def _choose_label_from_ranked(ranked: List[Tuple[Tuple[str, ...], float]], files: List[ClusteredFile]) -> str:
+    filenames = [_clean_filename_stem(f.file_meta.file_name) for f in files]
     for ng, _ in ranked[:50]:
         words = list(ng)
         # Remove non-adjacent duplicates ("Lecture Fall Lecture" → "Lecture Fall")
@@ -143,7 +212,15 @@ def _choose_label_from_ranked(ranked: List[Tuple[Tuple[str, ...], float]]) -> st
         for w in words:
             if w not in seen:
                 seen.append(w)
-        candidate = _sanitize_label(" ".join(seen))
+        candidate_words = _strip_label_noise(seen, filenames)
+        if not candidate_words:
+            continue
+        if len(candidate_words) < 2:
+            fallback = _sanitize_label(f"{candidate_words[0]} {_dominant_extension(files)}")
+            if fallback.lower() not in {"cluster", "noise"}:
+                return fallback
+            continue
+        candidate = _sanitize_label(" ".join(candidate_words))
         wc = len(candidate.split())
         if 1 <= wc <= 4 and candidate.lower() not in {"cluster", "noise"}:
             return candidate
@@ -152,7 +229,7 @@ def _choose_label_from_ranked(ranked: List[Tuple[Tuple[str, ...], float]]) -> st
 
 def _common_prefix_label(files: List[ClusteredFile]) -> str:
     """For numeric series (PS1/PS2/PS3, HW1/HW2) use the shared filename prefix."""
-    stems = [os.path.splitext(f.file_meta.file_name)[0] for f in files]
+    stems = [clean_filename(os.path.splitext(f.file_meta.file_name)[0]) for f in files]
     prefix = os.path.commonprefix(stems).strip()
     prefix = re.sub(r"[\s_\-]+$", "", prefix)   # strip trailing separators
     if len(prefix) >= 2:
@@ -163,14 +240,22 @@ def _common_prefix_label(files: List[ClusteredFile]) -> str:
 def _filename_fallback(files: List[ClusteredFile]) -> str:
     """Last-resort: most distinctive token(s) across all filenames in the cluster."""
     all_tokens: List[str] = []
+    filenames = [_clean_filename_stem(f.file_meta.file_name) for f in files]
     for f in files:
-        stem = re.sub(r"[_\-.]", " ", os.path.splitext(f.file_meta.file_name)[0])
+        stem = _clean_filename_stem(f.file_meta.file_name)
         all_tokens.extend(_tokens(stem))
     if not all_tokens:
         return ""
-    top = [w for w, _ in Counter(all_tokens).most_common(5)
-           if w not in _TOO_GENERIC and len(w) > 2][:2]
-    return _sanitize_label(" ".join(top)) if top else ""
+    top = [
+        w for w, _ in Counter(all_tokens).most_common(5)
+        if w not in _TOO_GENERIC and w not in ALWAYS_STRIP and len(w) > 2
+    ]
+    filtered = _strip_label_noise(top[:2], filenames)
+    if len(filtered) >= 2:
+        return _sanitize_label(" ".join(filtered[:2]))
+    if filtered:
+        return _sanitize_label(f"{filtered[0]} {_dominant_extension(files)}")
+    return ""
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
@@ -233,7 +318,7 @@ class FolderNamingAgent:
                     # 2. TF-IDF over extracted text + filenames
                     if not label:
                         ranked = _score_candidates(examples)
-                        label = _choose_label_from_ranked(ranked)
+                        label = _choose_label_from_ranked(ranked, files)
 
                     # 3. Filename-token fallback (no text needed)
                     if not label:

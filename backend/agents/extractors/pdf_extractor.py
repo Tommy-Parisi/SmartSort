@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 _HEADING_RE = re.compile(r'^[A-Z0-9].{0,70}$')
 
@@ -21,11 +22,11 @@ class PDFExtractorAgent:
                         raw = t
                         break
         except Exception:
-            return Path(file_path).stem
+            return clean_filename_stem(file_path)
 
         lines = [l.strip() for l in raw.splitlines() if l.strip()]
         if not lines:
-            return Path(file_path).stem
+            return clean_filename_stem(file_path)
 
         parts = [lines[0]]  # title = first non-empty line
         headings_seen = 0

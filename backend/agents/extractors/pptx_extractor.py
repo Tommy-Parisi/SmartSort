@@ -1,5 +1,6 @@
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 
 def _slide_title(slide) -> str:
@@ -23,12 +24,12 @@ class PptxExtractorAgent:
         try:
             from pptx import Presentation
         except ImportError:
-            return Path(file_path).stem
+            return clean_filename_stem(file_path)
 
         try:
             prs = Presentation(file_path)
         except Exception:
-            return Path(file_path).stem
+            return clean_filename_stem(file_path)
 
         titles = []
         for slide in prs.slides:
@@ -36,4 +37,4 @@ class PptxExtractorAgent:
             if t:
                 titles.append(t)
 
-        return token_cap(" ".join(titles)) if titles else Path(file_path).stem
+        return token_cap(" ".join(titles)) if titles else clean_filename_stem(file_path)

@@ -1,6 +1,6 @@
-from pathlib import Path
+from ..identity_utils import clean_filename_stem
 
 
 class FallbackExtractorAgent:
     def extract(self, file_path: str) -> str:
-        return Path(file_path).stem
+        return clean_filename_stem(file_path)

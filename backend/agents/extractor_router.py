@@ -1,5 +1,6 @@
 from ..core.models import FileMeta, FileContent
 from ..core.utils import log_error, normalize_text
+from .identity_utils import build_identity_text
 from .extractors import (
     PDFExtractorAgent,
     DocxExtractorAgent,
@@ -37,12 +38,13 @@ class ExtractorRouter:
         try:
             raw_text = extractor.extract(file_meta.file_path)
             normalized = normalize_text(raw_text)
+            identity = build_identity_text(file_meta.file_name, normalized)
 
-            if not normalized.strip():
+            if not identity.strip():
                 log_error(f"[ExtractorRouter] Empty output after extraction: {file_meta.file_name}")
                 return FileContent(file_meta=file_meta, raw_text="", status="error")
 
-            return FileContent(file_meta=file_meta, raw_text=normalized, status="success")
+            return FileContent(file_meta=file_meta, raw_text=identity, status="success")
 
         except Exception as e:
             log_error(f"[ExtractorRouter] Extraction failed for '{file_meta.file_name}': {e}")

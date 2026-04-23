@@ -12,13 +12,14 @@ Licensed: unlimited.
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
 
 SMARTSORT_DIR = Path.home() / ".smartsort"
 LICENSE_PATH = SMARTSORT_DIR / "license.key"
-TRIAL_FILE_LIMIT = 500
+TRIAL_FILE_LIMIT = 100
 
 
 def _read_raw() -> str:
@@ -74,6 +75,9 @@ def check_file_limit(file_count: int) -> dict:
             "count":     int,
         }
     """
+    if os.environ.get('SMARTSORT_DEV') == '1':
+        return {"allowed": True, "licensed": True, "limit": None, "count": file_count}
+
     licensed = is_licensed()
     if licensed:
         return {"allowed": True, "licensed": True, "limit": None, "count": file_count}

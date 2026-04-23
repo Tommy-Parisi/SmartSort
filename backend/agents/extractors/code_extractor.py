@@ -2,6 +2,7 @@ import ast
 import re
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 _TOP_COMMENT_RE = re.compile(r'^\s*(?://|#|\*)\s*(.+)')
 _FUNC_CLASS_RE = re.compile(
@@ -81,7 +82,7 @@ def _extract_generic(source: str, stem: str) -> str:
 
 class CodeExtractorAgent:
     def extract(self, file_path: str) -> str:
-        stem = Path(file_path).stem
+        stem = clean_filename_stem(file_path)
         try:
             with open(file_path, encoding="utf-8", errors="ignore") as f:
                 source = f.read(16384)

@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 _MD_HEADING_RE = re.compile(r'^#{1,6}\s+(.+)')
 
@@ -11,7 +12,7 @@ class TextExtractorAgent:
             with open(file_path, encoding="utf-8", errors="ignore") as f:
                 content = f.read(8192)
         except Exception:
-            return Path(file_path).stem
+            return clean_filename_stem(file_path)
 
         ext = Path(file_path).suffix.lower()
         if ext in (".md", ".markdown", ".rst"):

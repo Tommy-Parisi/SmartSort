@@ -2,7 +2,7 @@
 
 # Types that never produce meaningful semantic signal — skip embedding entirely.
 # Files of these types go to an unsorted/ folder rather than entering clustering.
-SKIP_EMBEDDING_TYPES = {"video", "audio", "archive", "image"}
+SKIP_EMBEDDING_TYPES = {"video", "audio", "archive"}
 
 # Files producing fewer than this many tokens after extraction get the same treatment.
 MIN_TOKENS_TO_EMBED = 5

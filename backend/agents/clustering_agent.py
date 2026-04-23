@@ -8,6 +8,7 @@ from sklearn.metrics.pairwise import cosine_distances
 
 from ..core.models import EmbeddedFile, ClusteredFile
 from ..core.utils import log_error
+from .identity_utils import extract_prefixed_doctype
 
 class SemanticClusterer:
     def __init__(self, fallback_k_range=(2, 10), min_cluster_size=3):
@@ -91,6 +92,7 @@ class ClusteringAgent:
         X = np.array([f.embedding for f in valid_files])
         try:
             labels = self.clusterer.cluster(X)
+            labels = self._split_mixed_doctype_clusters(valid_files, labels)
         except Exception as e:
             log_error(f"[ClusteringAgent] Clustering failed: {e}")
             return []
@@ -106,6 +108,46 @@ class ClusteringAgent:
             ))
 
         return clustered
+
+    def _split_mixed_doctype_clusters(
+        self,
+        embedded_files: list[EmbeddedFile],
+        labels: np.ndarray
+    ) -> np.ndarray:
+        next_label = int(labels.max()) + 1 if len(labels) else 0
+        refined = labels.copy()
+
+        for cluster_id in sorted(set(int(label) for label in labels if int(label) != -1)):
+            indices = [i for i, label in enumerate(labels) if int(label) == cluster_id]
+            doctypes = [extract_prefixed_doctype(embedded_files[i].raw_text) for i in indices]
+            typed_groups: dict[str, list[int]] = defaultdict(list)
+            unknown_indices: list[int] = []
+
+            for idx, doctype in zip(indices, doctypes):
+                if doctype:
+                    typed_groups[doctype].append(idx)
+                else:
+                    unknown_indices.append(idx)
+
+            if len(typed_groups) <= 1:
+                continue
+
+            dominant_doctype = max(typed_groups.items(), key=lambda item: len(item[1]))[0]
+            for idx in unknown_indices:
+                typed_groups[dominant_doctype].append(idx)
+
+            first = True
+            for _, group_indices in sorted(typed_groups.items(), key=lambda item: item[0]):
+                if first:
+                    for idx in group_indices:
+                        refined[idx] = cluster_id
+                    first = False
+                else:
+                    for idx in group_indices:
+                        refined[idx] = next_label
+                    next_label += 1
+
+        return refined
 
     def merge_similar_clusters(
         self,

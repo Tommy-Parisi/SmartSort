@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 import pytest
 from backend.agents.extractor_router import ExtractorRouter
+from backend.agents.extractors.ocr_extractor import OCRExtractorAgent
 from backend.core.models import FileMeta
 import fpdf
 
@@ -39,10 +40,15 @@ def test_file_dir():
 
     # Create dummy image file (OCR test)
     try:
-        from PIL import Image, ImageDraw
-        img = Image.new("RGB", (100, 30), color=(255, 255, 255))
+        from PIL import Image, ImageDraw, ImageFont
+        img = Image.new("RGB", (1200, 320), color=(255, 255, 255))
         d = ImageDraw.Draw(img)
-        d.text((10, 10), "Hello", fill=(0, 0, 0))
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", 48)
+        except Exception:
+            font = ImageFont.load_default()
+        d.text((40, 40), "UNIVERSITY HEALTH PLAN", fill=(0, 0, 0), font=font)
+        d.text((40, 140), "coverage benefits policy agreement", fill=(0, 0, 0), font=font)
         img.save(str(temp_dir / "image.png"))
     except ImportError:
         pass
@@ -95,6 +101,21 @@ def test_extractor_router_outputs_clean_text(test_file_dir):
             assert "\r" not in result.raw_text
 
 
+def test_image_extraction_prefers_ocr_when_text_present(test_file_dir, monkeypatch):
+    monkeypatch.setattr(
+        OCRExtractorAgent,
+        "extract",
+        lambda self, _path: "scanned document UNIVERSITY HEALTH PLAN coverage benefits policy agreement"
+    )
+    router = ExtractorRouter()
+    meta = build_file_meta(test_file_dir / "image.png", "image")
+    result = router.route(meta)
+    assert result.status == "success"
+    assert isinstance(result.raw_text, str)
+    assert len(result.raw_text.strip()) > 0
+    assert "scanned document" in result.raw_text.lower() or "agreement:" in result.raw_text.lower()
+
+
 @pytest.fixture(scope="module")
 def edge_case_dir():
     temp_dir = Path(tempfile.mkdtemp(prefix="extract_edge_"))
@@ -131,11 +152,11 @@ def build_file_meta(path: Path, detected_type: str) -> FileMeta:
     )
 
 @pytest.mark.parametrize("fname, ftype, expected_status", [
-    ("empty.txt", "text", "error"),
-    ("archive.zip", "unknown", "error"),
+    ("empty.txt", "text", "success"),
+    ("archive.zip", "unknown", "success"),
     ("binary.txt", "text", "success"),   # Might technically extract weird content
-    ("fake.pdf", "pdf", "error"),
-    ("mystery.xyz", "unknown", "error")
+    ("fake.pdf", "pdf", "success"),
+    ("mystery.xyz", "unknown", "success")
 ])
 def test_extractor_router_edge_cases(edge_case_dir, fname, ftype, expected_status):
     router = ExtractorRouter()

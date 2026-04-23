@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 # Keys that indicate a numeric annotation/label file (COCO, YOLO, BDD, etc.)
 _ANNOTATION_KEYS = {
@@ -43,7 +44,7 @@ def _extract_strings(obj, depth: int = 0, max_depth: int = 2, limit: int = 30) -
 
 class JSONExtractorAgent:
     def extract(self, file_path: str) -> str:
-        stem = Path(file_path).stem
+        stem = clean_filename_stem(file_path)
 
         try:
             with open(file_path, encoding="utf-8", errors="ignore") as f:

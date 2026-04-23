@@ -1,5 +1,6 @@
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 _HEADING_STYLES = {"heading 1", "heading 2", "heading 3", "title"}
 _HEADING_THRESHOLD = 3   # docs with fewer headings are treated as freeform body text
@@ -12,7 +13,7 @@ class DocxExtractorAgent:
             from docx import Document
             doc = Document(file_path)
         except Exception:
-            return Path(file_path).stem
+            return clean_filename_stem(file_path)
 
         headings, body = [], []
         for para in doc.paragraphs:
@@ -50,4 +51,4 @@ class DocxExtractorAgent:
                     parts.append(text)
                     break
 
-        return token_cap(" ".join(parts)) if parts else Path(file_path).stem
+        return token_cap(" ".join(parts)) if parts else clean_filename_stem(file_path)

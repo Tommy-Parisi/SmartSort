@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 from ...core.utils import token_cap
+from ..identity_utils import clean_filename_stem
 
 
 class TabularExtractorAgent:
@@ -13,7 +14,7 @@ class TabularExtractorAgent:
                 return token_cap(self._extract_xlsx(file_path))
         except Exception:
             pass
-        return Path(file_path).stem
+        return clean_filename_stem(file_path)
 
     def _extract_csv(self, file_path: str) -> str:
         rows = []
