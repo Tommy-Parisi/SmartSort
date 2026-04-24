@@ -152,6 +152,9 @@ pub async fn start_sort(
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
+        #[cfg(debug_assertions)]
+        cmd.env("SMARTSORT_DEV", "1");
+
         if preview_mode {
             cmd.arg("--dry-run");
         }
@@ -229,14 +232,21 @@ pub struct FileAssignment {
 }
 
 #[tauri::command]
-pub async fn confirm_sort(base_folder: String, preview_folders: Vec<Value>) -> Result<(), String> {
-    info!("confirm_sort called: {} folders, base={}", preview_folders.len(), base_folder);
+pub async fn confirm_sort(
+    base_folder: String,
+    preview_folders: Vec<Value>,
+    trashed_filenames: Vec<String>,
+) -> Result<(), String> {
+    info!("confirm_sort called: {} folders, {} trashed, base={}", preview_folders.len(), trashed_filenames.len(), base_folder);
 
     let python_exe = get_python_executable();
     let backend_dir = get_backend_dir();
 
     let preview_json = serde_json::to_string(&preview_folders)
         .map_err(|e| format!("Failed to serialize preview: {}", e))?;
+
+    let trashed_json = serde_json::to_string(&trashed_filenames)
+        .map_err(|e| format!("Failed to serialize trashed: {}", e))?;
 
     let output = Command::new(&python_exe)
         .args(["-m", "backend.pipeline.tauri_pipeline"])
@@ -245,6 +255,8 @@ pub async fn confirm_sort(base_folder: String, preview_folders: Vec<Value>) -> R
         .arg(&base_folder)
         .arg("--preview-json")
         .arg(&preview_json)
+        .arg("--trashed-json")
+        .arg(&trashed_json)
         .current_dir(&backend_dir)
         .output()
         .map_err(|e| format!("Failed to run apply_preview: {}", e))?;

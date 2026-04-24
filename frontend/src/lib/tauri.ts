@@ -58,8 +58,11 @@ export interface FileAssignment {
   folder_name: string;
 }
 
-export const tauriConfirmSort = (baseFolder: string, previewFolders: PreviewFolder[]) =>
-  invoke<void>('confirm_sort', { baseFolder, previewFolders });
+export const tauriConfirmSort = (
+  baseFolder: string,
+  previewFolders: PreviewFolder[],
+  trashedFilenames: string[],
+) => invoke<void>('confirm_sort', { baseFolder, previewFolders, trashedFilenames });
 
 export const tauriReassignFiles = (
   filenames: string[],

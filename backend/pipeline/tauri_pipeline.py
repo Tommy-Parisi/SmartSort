@@ -526,8 +526,10 @@ class TauriPipeline:
             self.results["errors"].append(f"Index persistence failed: {exc}")
 
 
-def apply_preview(base_folder: str, preview_folders: list) -> dict:
-    """Apply user-edited preview assignments to disk and log moves for undo."""
+def apply_preview(base_folder: str, preview_folders: list,
+                  trashed_filenames: list | None = None) -> dict:
+    """Apply user-edited preview assignments to disk and log moves for undo.
+    Files in trashed_filenames are permanently deleted from base_folder."""
     import shutil
     from datetime import datetime, timezone
 
@@ -537,6 +539,7 @@ def apply_preview(base_folder: str, preview_folders: list) -> dict:
     move_log = smartsort_dir / "move_log.jsonl"
 
     moved = 0
+    deleted = 0
     errors = []
 
     for folder in preview_folders:
@@ -584,7 +587,17 @@ def apply_preview(base_folder: str, preview_folders: list) -> dict:
             except Exception as exc:
                 errors.append(f"Failed to move '{src}': {exc}")
 
-    return {"status": "done", "moved": moved, "errors": errors}
+    # Delete trashed files
+    for filename in (trashed_filenames or []):
+        src = base / filename
+        if src.exists():
+            try:
+                src.unlink()
+                deleted += 1
+            except Exception as exc:
+                errors.append(f"Failed to delete '{src}': {exc}")
+
+    return {"status": "done", "moved": moved, "deleted": deleted, "errors": errors}
 
 
 def undo_last_sort() -> dict:
@@ -647,6 +660,8 @@ def main():
                        help='Base folder for --apply-preview')
     parser.add_argument('--preview-json', metavar='JSON',
                        help='JSON array of preview folders for --apply-preview')
+    parser.add_argument('--trashed-json', metavar='JSON',
+                       help='JSON array of filenames to permanently delete at apply-preview time')
     parser.add_argument('--daemon-status', action='store_true',
                        help='Print daemon status as JSON and exit')
     parser.add_argument('--start-daemon', metavar='FOLDERS_JSON',
@@ -714,9 +729,10 @@ def main():
             sys.exit(1)
         try:
             folders = json.loads(args.preview_json)
-            result = apply_preview(args.base_folder, folders)
+            trashed = json.loads(args.trashed_json) if args.trashed_json else None
+            result = apply_preview(args.base_folder, folders, trashed)
             print(json.dumps(result))
-            if result["errors"] and result["moved"] == 0:
+            if result["errors"] and result["moved"] == 0 and result.get("deleted", 0) == 0:
                 sys.exit(1)
         except Exception as e:
             print(json.dumps({"status": "error", "message": str(e)}))

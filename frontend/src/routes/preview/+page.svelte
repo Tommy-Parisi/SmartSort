@@ -13,7 +13,15 @@
   let previewFolders: PreviewFolder[] = [];
   let unsortedFiles: PreviewFile[] = [];
 
-  $: sortedPreviewFolders = [...previewFolders].sort((a, b) => b.files.length - a.files.length);
+  // Stable display order — set once on load, not re-sorted on file count changes.
+  // This prevents folders from jumping when a file is removed (X button).
+  let displayOrder: number[] = [];
+  $: sortedPreviewFolders = [
+    ...displayOrder
+      .map(id => previewFolders.find(f => f.cluster_id === id))
+      .filter((f): f is PreviewFolder => !!f),
+    ...previewFolders.filter(f => !displayOrder.includes(f.cluster_id)),
+  ];
 
   // ── File Preview ──────────────────────────────────────────────────────────
   let previewingFile: PreviewFile | null = null;
@@ -51,10 +59,10 @@
   // ── Card interaction ──────────────────────────────────────────────────────
   let editingCardId:    number | null = null;
   let editingCardValue = '';
-  let expandedCardIds  = new Set<number>();   // multiple expansion
-  let reassigningId:   number | null = null;
+  let expandedCardIds  = new Set<number>();
   let flashingCardIds  = new Set<number>();
   let newFolderEditingId: number | null = null;
+  let reclustering     = false;
 
   // ── Drag & drop ───────────────────────────────────────────────────────────
   let draggedFile:      PreviewFile | null = null;
@@ -67,20 +75,48 @@
     | null = null;
   let isPointerDragging = false;
   let dragPointer = { x: 0, y: 0 };
-  let suppressCardClick = false;
 
   // ── Unsorted panel ────────────────────────────────────────────────────────
   let openUnsortedMoveFile: string | null = null;
 
+  // ── Sort ──────────────────────────────────────────────────────────────────
+  type SortMode = 'count-desc' | 'count-asc' | 'alpha-asc' | 'alpha-desc';
+  let sortMode: SortMode = 'count-desc';
+
+  function applySort(mode: SortMode) {
+    sortMode = mode;
+    const folders = [...previewFolders];
+    if (mode === 'count-desc')  folders.sort((a, b) => b.files.length - a.files.length);
+    else if (mode === 'count-asc')  folders.sort((a, b) => a.files.length - b.files.length);
+    else if (mode === 'alpha-asc')  folders.sort((a, b) => a.name.localeCompare(b.name));
+    else if (mode === 'alpha-desc') folders.sort((a, b) => b.name.localeCompare(a.name));
+    displayOrder = folders.map(f => f.cluster_id);
+  }
+
+  // ── Trash ─────────────────────────────────────────────────────────────────
+  let trashedFiles: PreviewFile[] = [];
+  let trashExpanded = false;
+  let dragOverTrash = false;
+
+  function restoreFromTrash(file: PreviewFile) {
+    trashedFiles = trashedFiles.filter(f => f.filename !== file.filename);
+    unsortedFiles = [...unsortedFiles, { ...file, currentClusterId: null }];
+  }
+
   // ── Confirm ───────────────────────────────────────────────────────────────
   let confirming = false;
   let error = '';
-  let lastUndo: {
+
+  // Undo stack (up to 5 levels)
+  type UndoSnapshot = {
     previewFolders: PreviewFolder[];
     unsortedFiles: PreviewFile[];
+    trashedFiles: PreviewFile[];
     expandedCardIds: Set<number>;
+    displayOrder: number[];
     label: string;
-  } | null = null;
+  };
+  let undoStack: UndoSnapshot[] = [];
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   $: totalFiles   = previewFolders.reduce((s, f) => s + f.files.length, 0);
@@ -123,20 +159,26 @@
   }
 
   function snapshotState(label: string) {
-    lastUndo = {
+    const snap: UndoSnapshot = {
       previewFolders: previewFolders.map(cloneFolder),
       unsortedFiles: unsortedFiles.map(cloneFile),
+      trashedFiles: trashedFiles.map(cloneFile),
       expandedCardIds: new Set(expandedCardIds),
+      displayOrder: [...displayOrder],
       label,
     };
+    undoStack = [...undoStack.slice(-4), snap]; // keep last 5
   }
 
   function undoLastMove() {
-    if (!lastUndo) return;
-    previewFolders = lastUndo.previewFolders.map(cloneFolder);
-    unsortedFiles = lastUndo.unsortedFiles.map(cloneFile);
-    expandedCardIds = new Set(lastUndo.expandedCardIds);
-    lastUndo = null;
+    const snap = undoStack[undoStack.length - 1];
+    if (!snap) return;
+    undoStack = undoStack.slice(0, -1);
+    previewFolders = snap.previewFolders.map(cloneFolder);
+    unsortedFiles = snap.unsortedFiles.map(cloneFile);
+    trashedFiles = snap.trashedFiles.map(cloneFile);
+    expandedCardIds = new Set(snap.expandedCardIds);
+    displayOrder = [...snap.displayOrder];
     clearPointerDrag();
   }
 
@@ -158,7 +200,10 @@
         })),
       }));
 
-    expandedCardIds = new Set(previewFolders.map(f => f.cluster_id));
+    expandedCardIds = new Set(); // cards start collapsed
+    displayOrder = [...previewFolders]
+      .sort((a, b) => b.files.length - a.files.length)
+      .map(f => f.cluster_id);
 
     const unsorted = rawFolders.find(f => f.cluster_id === -1 || f.folder_name === 'Unsorted');
     unsortedFiles = (unsorted?.files ?? []).map(file => ({
@@ -172,17 +217,23 @@
     const onPointerUp = (e: PointerEvent) => handlePointerUp(e);
     const onPointerCancel = () => clearPointerDrag();
     const onWindowBlur = () => clearPointerDrag();
+    // Block the browser's selectstart event whenever a drag candidate is held.
+    // This is the last line of defence — selectstart fires before any text is
+    // visually highlighted, so preventing it here kills selection at the root.
+    const onSelectStart = (e: Event) => { if (dragCandidate) e.preventDefault(); };
 
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
     window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('selectstart', onSelectStart);
 
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('selectstart', onSelectStart);
     };
   });
 
@@ -237,7 +288,9 @@
   // ── Move helpers ──────────────────────────────────────────────────────────
   function removeFromSource(file: PreviewFile) {
     if (file.currentClusterId === null) {
+      // File may be in unsortedFiles or trashedFiles
       unsortedFiles = unsortedFiles.filter(f => f.filename !== file.filename);
+      trashedFiles  = trashedFiles.filter(f => f.filename !== file.filename);
     } else {
       previewFolders = previewFolders.map(f =>
         f.cluster_id === file.currentClusterId
@@ -272,6 +325,16 @@
     unsortedFiles = [...unsortedFiles, { ...file, currentClusterId: null }];
   }
 
+  function trashFileFromCard(file: PreviewFile, folderId: number) {
+    snapshotState(`Trash ${file.filename}`);
+    previewFolders = previewFolders.map(f =>
+      f.cluster_id === folderId
+        ? { ...f, files: f.files.filter(pf => pf.filename !== file.filename) }
+        : f
+    );
+    trashedFiles = [...trashedFiles, { ...file, currentClusterId: null }];
+  }
+
   function moveUnsortedFile(filename: string, val: string) {
     openUnsortedMoveFile = null;
     if (!val) return;
@@ -300,6 +363,7 @@
           : f
       );
 
+    displayOrder = displayOrder.filter(id => id !== sourceId);
     expandedCardIds.delete(sourceId);
     expandedCardIds = new Set([...expandedCardIds, targetId]);
     flashCard(targetId);
@@ -308,6 +372,7 @@
   // ── Pointer drag: source ─────────────────────────────────────────────────
   function onFilePointerDown(e: PointerEvent, file: PreviewFile) {
     if (e.button !== 0) return;
+    document.body.classList.add('dragging');
     dragCandidate = {
       kind: 'file',
       file,
@@ -325,6 +390,7 @@
       return;
     }
 
+    document.body.classList.add('dragging');
     dragCandidate = {
       kind: 'folder',
       folder,
@@ -337,6 +403,11 @@
 
   function handlePointerMove(e: PointerEvent) {
     if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
+
+    // Prevent browser text-selection default for every move while a drag candidate
+    // is held — not just after the threshold. Without this, moves < 6px never call
+    // preventDefault and the browser happily starts selecting text.
+    e.preventDefault();
 
     dragPointer = { x: e.clientX, y: e.clientY };
     if (!isPointerDragging) {
@@ -355,14 +426,17 @@
     }
 
     updatePointerDropTarget(e.clientX, e.clientY);
-    e.preventDefault();
   }
 
   function handlePointerUp(e: PointerEvent) {
     if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
 
     if (isPointerDragging && draggedFile) {
-      if (dragOverFolderId !== null && draggedFile.currentClusterId !== dragOverFolderId) {
+      if (dragOverTrash) {
+        snapshotState(`Trash ${draggedFile.filename}`);
+        removeFromSource(draggedFile);
+        trashedFiles = [...trashedFiles, { ...draggedFile, currentClusterId: null }];
+      } else if (dragOverFolderId !== null && draggedFile.currentClusterId !== dragOverFolderId) {
         snapshotState(`Move ${draggedFile.filename}`);
         moveFileTo(draggedFile, dragOverFolderId);
         flashCard(dragOverFolderId);
@@ -370,13 +444,19 @@
         snapshotState(`Move ${draggedFile.filename}`);
         moveFileToUnsorted(draggedFile);
       }
-      suppressCardClick = true;
     } else if (isPointerDragging && draggedFolder) {
-      if (dragOverFolderId !== null && dragOverFolderId !== draggedFolder.cluster_id) {
+      if (dragOverTrash) {
+        snapshotState(`Trash ${draggedFolder.name}`);
+        const id = draggedFolder.cluster_id;
+        trashedFiles = [...trashedFiles, ...draggedFolder.files.map(f => ({ ...f, currentClusterId: null }))];
+        previewFolders = previewFolders.filter(f => f.cluster_id !== id);
+        displayOrder   = displayOrder.filter(did => did !== id);
+        expandedCardIds.delete(id);
+        expandedCardIds = new Set(expandedCardIds);
+      } else if (dragOverFolderId !== null && dragOverFolderId !== draggedFolder.cluster_id) {
         snapshotState(`Merge ${draggedFolder.name}`);
         mergeFolderInto(draggedFolder.cluster_id, dragOverFolderId);
       }
-      suppressCardClick = true;
     } else if (!isPointerDragging && dragCandidate.kind === 'file') {
       showFilePreview(dragCandidate.file);
     }
@@ -387,9 +467,11 @@
   function updatePointerDropTarget(x: number, y: number) {
     dragOverFolderId = null;
     dragOverUnsorted = false;
+    dragOverTrash    = false;
     if (!draggedFile && !draggedFolder) return;
 
     const hovered = document.elementFromPoint(x, y) as HTMLElement | null;
+
     const folderTarget = hovered?.closest<HTMLElement>('[data-folder-drop]');
     if (folderTarget) {
       const id = Number(folderTarget.dataset.folderDrop);
@@ -401,64 +483,77 @@
       }
     }
 
-    const unsortedTarget = hovered?.closest<HTMLElement>('[data-unsorted-drop]');
-    if (unsortedTarget && draggedFile && draggedFile.currentClusterId !== null) {
-      dragOverUnsorted = true;
+    const trashTarget = hovered?.closest<HTMLElement>('[data-trash-drop]');
+    if (trashTarget && (draggedFile || draggedFolder)) { dragOverTrash = true; return; }
+
+    if (draggedFile) {
+      const unsortedTarget = hovered?.closest<HTMLElement>('[data-unsorted-drop]');
+      if (unsortedTarget && draggedFile.currentClusterId !== null) {
+        dragOverUnsorted = true;
+      }
     }
   }
 
   function clearPointerDrag() {
-    dragCandidate = null;
-    draggedFile = null;
-    draggedFolder = null;
+    dragCandidate    = null;
+    draggedFile      = null;
+    draggedFolder    = null;
     dragOverFolderId = null;
     dragOverUnsorted = false;
+    dragOverTrash    = false;
     isPointerDragging = false;
+    document.body.classList.remove('dragging');
   }
 
-  // ── Delete folder ─────────────────────────────────────────────────────────
+  // ── Delete folder (reclusters deleted files into remaining clusters) ──────
   async function deleteFolder(e: MouseEvent, folder: PreviewFolder) {
     e.stopPropagation();
+    snapshotState(`Delete ${folder.name}`);
     const id = folder.cluster_id;
-    reassigningId = id;
+
+    // Remove folder from display immediately
+    previewFolders = previewFolders.filter(f => f.cluster_id !== id);
+    displayOrder = displayOrder.filter(did => did !== id);
+    expandedCardIds.delete(id);
+    expandedCardIds = new Set(expandedCardIds);
+
+    reclustering = true;
     try {
       const filenames = folder.files.map(f => f.filename);
       const assignments = await tauriReassignFiles(filenames, id);
       const addedToUnsorted: PreviewFile[] = [];
+      const assignedFilenames = new Set<string>();
 
-      previewFolders = previewFolders
-        .filter(f => f.cluster_id !== id)
-        .map(f => {
-          const incoming = assignments.filter(a => a.cluster_id === f.cluster_id);
-          if (incoming.length === 0) return f;
-          flashCard(f.cluster_id);
-          return {
-            ...f,
-            files: [...f.files, ...incoming.map(a => ({
-              filename: a.filename,
-              ext: a.filename.split('.').pop()?.toLowerCase() ?? '',
-              originalClusterId: id,
-              currentClusterId: f.cluster_id,
-            }))],
-          };
-        });
+      previewFolders = previewFolders.map(f => {
+        const incoming = assignments.filter(a => a.cluster_id === f.cluster_id);
+        if (incoming.length === 0) return f;
+        flashCard(f.cluster_id);
+        incoming.forEach(a => assignedFilenames.add(a.filename));
+        return {
+          ...f,
+          files: [...f.files, ...incoming.map(a => ({
+            filename: a.filename,
+            ext: a.filename.split('.').pop()?.toLowerCase() ?? '',
+            originalClusterId: id,
+            currentClusterId: f.cluster_id,
+          }))],
+        };
+      });
 
-      for (const a of assignments.filter(a => a.cluster_id === -1)) {
-        addedToUnsorted.push({
-          filename: a.filename,
-          ext: a.filename.split('.').pop()?.toLowerCase() ?? '',
-          originalClusterId: id,
-          currentClusterId: null,
-        });
+      // Unassigned or below-threshold files → unsorted
+      for (const f of folder.files) {
+        if (!assignedFilenames.has(f.filename)) {
+          addedToUnsorted.push({ ...f, currentClusterId: null });
+        }
       }
       if (addedToUnsorted.length > 0) {
         unsortedFiles = [...unsortedFiles, ...addedToUnsorted];
       }
     } catch {
+      // Fallback: move all to unsorted if FAISS index unavailable
       unsortedFiles = [...unsortedFiles, ...folder.files.map(f => ({ ...f, currentClusterId: null }))];
-      previewFolders = previewFolders.filter(f => f.cluster_id !== id);
     } finally {
-      reassigningId = null;
+      reclustering = false;
     }
   }
 
@@ -466,6 +561,8 @@
   function addNewFolder() {
     const id = Date.now();
     previewFolders     = [...previewFolders, { cluster_id: id, name: 'New Folder', files: [], isNew: true }];
+    displayOrder       = [...displayOrder, id];
+    expandedCardIds    = new Set([...expandedCardIds, id]);
     newFolderEditingId = id;
     editingCardId      = id;
     editingCardValue   = 'New Folder';
@@ -476,21 +573,17 @@
     confirming = true;
     error = '';
     try {
-      await tauriConfirmSort(store.selectedFolder!, previewFolders);
+      await tauriConfirmSort(
+        store.selectedFolder!,
+        previewFolders,
+        trashedFiles.map(f => f.filename),
+      );
       sortStore.update(s => ({ ...s, stage: 'done' }));
       goto('/done');
     } catch (e: any) {
       error = typeof e === 'string' ? e : 'Failed to move files.';
       confirming = false;
     }
-  }
-
-  function handleFolderCardClick(id: number) {
-    if (suppressCardClick) {
-      suppressCardClick = false;
-      return;
-    }
-    toggleExpanded(id);
   }
 </script>
 
@@ -543,43 +636,110 @@
           {/each}
         {/if}
       </div>
+
+      <!-- Reclustering frosted-glass overlay -->
+      {#if reclustering}
+        <div class="recluster-overlay">
+          <div class="spinner"></div>
+          <span>Reclustering…</span>
+        </div>
+      {/if}
+
+      <!-- Trash zone -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="trash-zone"
+        data-trash-drop="true"
+        class:drag-over={dragOverTrash}
+      >
+        <button
+          class="trash-header"
+          type="button"
+          on:click={() => trashExpanded = !trashExpanded}
+        >
+          <span class="trash-icon">🗑</span>
+          <span>Trash · {trashedFiles.length} {trashedFiles.length === 1 ? 'file' : 'files'}</span>
+          <span class="trash-chevron" class:open={trashExpanded}>^</span>
+        </button>
+        {#if trashExpanded && trashedFiles.length > 0}
+          <div class="trash-files">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            {#each trashedFiles as file (file.filename)}
+              <div
+                class="file-row trash-file-row"
+                class:pointer-dragging={draggedFile?.filename === file.filename}
+                on:pointerdown={e => onFilePointerDown(e, file)}
+              >
+                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                <span class="file-name">{trunc(file.filename, 20)}</span>
+                <button
+                  class="restore-btn"
+                  type="button"
+                  on:pointerdown|stopPropagation
+                  on:click={() => restoreFromTrash(file)}
+                  title="Restore to unsorted"
+                >↩</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if trashExpanded && trashedFiles.length === 0}
+          <p class="empty-state" style="padding:10px 14px;font-size:11px;">
+            {dragOverTrash ? 'Drop to delete on confirm' : 'No files in trash'}
+          </p>
+        {/if}
+      </div>
     </div>
 
     <!-- ── Right panel: folder cards ─────────────────────────────────────── -->
     <div class="right-panel">
-      <p class="panel-header">{totalFolders} folders · {totalFiles} files</p>
+      <div class="panel-header-row">
+        <span class="panel-header-text">{totalFolders} folders · {totalFiles} files</span>
+        <div class="sort-bar">
+          <button class="sort-btn" class:active={sortMode === 'count-desc'} on:click={() => applySort('count-desc')} title="Most files first">↓ #</button>
+          <button class="sort-btn" class:active={sortMode === 'count-asc'}  on:click={() => applySort('count-asc')}  title="Fewest files first">↑ #</button>
+          <button class="sort-btn" class:active={sortMode === 'alpha-asc'}  on:click={() => applySort('alpha-asc')}  title="A → Z">A→Z</button>
+          <button class="sort-btn" class:active={sortMode === 'alpha-desc'} on:click={() => applySort('alpha-desc')} title="Z → A">Z→A</button>
+        </div>
+        <button
+          class="undo-btn"
+          disabled={undoStack.length === 0}
+          on:click={undoLastMove}
+          title={undoStack.length > 0 ? `Undo: ${undoStack[undoStack.length - 1].label}` : 'Nothing to undo'}
+        >
+          ↩ Undo{#if undoStack.length > 0}<span class="undo-count">{undoStack.length}</span>{/if}
+        </button>
+      </div>
       <div class="panel-scroll">
         <div class="drag-help">
-          Drag a file onto a folder to move it. Drag a folder onto another folder to merge them.
+          Drag files or folders to reorganize. Drag to 🗑 to permanently delete on confirm.
         </div>
-        <div class="cards-grid">
+        <div class="cards-grid" class:has-expanded={expandedCardIds.size > 0}>
 
           {#each sortedPreviewFolders as folder (folder.cluster_id)}
-            <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="folder-card"
               data-folder-drop={folder.cluster_id}
               class:drag-over={dragOverFolderId === folder.cluster_id}
               class:pointer-dragging={draggedFolder?.cluster_id === folder.cluster_id}
               class:flash={flashingCardIds.has(folder.cluster_id)}
+              class:expanded={expandedCardIds.has(folder.cluster_id)}
               on:pointerdown={e => onFolderPointerDown(e, folder)}
-              on:click={() => handleFolderCardClick(folder.cluster_id)}
             >
               <!-- pointer-events: none wrapper so child elements don't intercept dragover -->
               <div class="card-content">
                 <!-- × delete -->
-                {#if reassigningId !== folder.cluster_id}
-                  <button
-                    class="card-delete pe-auto"
-                    type="button"
-                    on:pointerdown|stopPropagation
-                    on:click={e => deleteFolder(e, folder)}
-                    tabindex="-1"
-                    title="Delete folder"
-                  >×</button>
-                {/if}
+                <button
+                  class="card-delete pe-auto"
+                  type="button"
+                  on:pointerdown|stopPropagation
+                  on:click={e => deleteFolder(e, folder)}
+                  tabindex="-1"
+                  title="Delete folder"
+                >×</button>
 
-                <!-- Folder name -->
+                <!-- Folder name (click to rename) -->
                 {#if editingCardId === folder.cluster_id}
                   <input
                     class="card-name-input pe-auto"
@@ -599,8 +759,17 @@
                   >{folder.name}</span>
                 {/if}
 
-                <!-- File count -->
-                <span class="card-count">{folder.files.length} {folder.files.length === 1 ? 'file' : 'files'}</span>
+                <!-- Collapse/expand toggle (chevron + file count) -->
+                <button
+                  class="card-toggle pe-auto"
+                  type="button"
+                  on:pointerdown|stopPropagation
+                  on:click|stopPropagation={() => toggleExpanded(folder.cluster_id)}
+                  title={expandedCardIds.has(folder.cluster_id) ? 'Collapse' : 'Expand'}
+                >
+                  <span class="chevron" class:open={expandedCardIds.has(folder.cluster_id)}>^</span>
+                  <span class="card-count">{folder.files.length} {folder.files.length === 1 ? 'file' : 'files'}</span>
+                </button>
 
                 <!-- Expanded file list -->
                 {#if expandedCardIds.has(folder.cluster_id)}
@@ -622,6 +791,13 @@
                           on:click|stopPropagation={() => removeFileFromCard(file, folder.cluster_id)}
                           title="Send to unsorted"
                         >×</button>
+                        <button
+                          class="card-file-trash"
+                          type="button"
+                          on:pointerdown|stopPropagation
+                          on:click|stopPropagation={() => trashFileFromCard(file, folder.cluster_id)}
+                          title="Delete on confirm"
+                        >🗑</button>
                       </div>
                     {/each}
                     {#if folder.files.length === 0}
@@ -630,13 +806,6 @@
                   </div>
                 {/if}
               </div>
-
-              <!-- Spinner overlay -->
-              {#if reassigningId === folder.cluster_id}
-                <div class="card-overlay">
-                  <div class="spinner"></div>
-                </div>
-              {/if}
             </div>
           {/each}
 
@@ -654,9 +823,6 @@
   <!-- ── Bottom bar ─────────────────────────────────────────────────────── -->
   <div class="bottom-bar">
     <button class="btn-ghost" on:click={() => goto('/')}>Back</button>
-    <button class="btn-ghost" disabled={!lastUndo} on:click={undoLastMove}>
-      {lastUndo ? `Undo ${lastUndo.label}` : 'Undo'}
-    </button>
     {#if error}
       <p class="error-text">{error}</p>
     {/if}
@@ -688,7 +854,7 @@
           {#if filePreview.mime_type.startsWith('image/')}
             <img class="preview-media" src={`data:${filePreview.mime_type};base64,${filePreview.data}`} alt={previewingFile.filename} />
           {:else if filePreview.mime_type === 'application/pdf'}
-            <iframe class="preview-media" title="PDF Preview" src={`data:application/pdf;base64,${filePreview.data}`} />
+            <iframe class="preview-media" title="PDF Preview" src={`data:application/pdf;base64,${filePreview.data}`}></iframe>
           {:else if filePreview.mime_type === 'text/plain'}
             <pre class="preview-text">{textContent || 'Empty file.'}</pre>
           {:else}
@@ -764,6 +930,25 @@
     background: var(--bg);
     overflow: hidden;
     transition: background 100ms;
+    position: relative;
+  }
+
+  /* Frosted-glass reclustering overlay */
+  .recluster-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    z-index: 20;
+    pointer-events: all;
   }
 
   .left-panel.drag-over {
@@ -790,6 +975,7 @@
     padding: 6px 12px;
     cursor: pointer;
     touch-action: none;
+    user-select: none;
     transition: background 100ms;
   }
   .file-row:hover  { background: var(--bg-secondary); }
@@ -860,17 +1046,173 @@
     background: var(--bg-secondary);
   }
 
+  /* Header row: title + sort bar + undo */
+  .panel-header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 0.5px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .panel-header-text {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    flex: 1;
+    white-space: nowrap;
+  }
+
+  /* Sort buttons */
+  .sort-bar {
+    display: flex;
+    gap: 2px;
+  }
+
+  .sort-btn {
+    background: none;
+    border: 0.5px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .sort-btn:hover { background: var(--bg); color: var(--text); }
+  .sort-btn.active {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+  }
+
+  /* Undo button (with optional count badge) */
+  .undo-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: 5px;
+    padding: 5px 11px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 120ms;
+  }
+  .undo-btn:hover:not(:disabled) { opacity: 0.8; }
+  .undo-btn:disabled { opacity: 0.18; cursor: not-allowed; }
+
+  .undo-count {
+    background: var(--accent);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 8px;
+    line-height: 1.4;
+  }
+
+  /* ── Trash zone (bottom of left panel) ── */
+  .trash-zone {
+    border-top: 1px solid rgba(192, 57, 43, 0.25);
+    flex-shrink: 0;
+    background: rgba(192, 57, 43, 0.04);
+    transition: background 100ms, border-color 100ms;
+  }
+  .trash-zone.drag-over {
+    background: rgba(192, 57, 43, 0.12);
+    border-top-color: var(--error);
+  }
+
+  .trash-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--error);
+    text-align: left;
+    opacity: 0.7;
+  }
+  .trash-header:hover { opacity: 1; }
+  .trash-zone.drag-over .trash-header { opacity: 1; }
+
+  .trash-icon { font-size: 13px; }
+
+  .trash-chevron {
+    margin-left: auto;
+    display: inline-block;
+    font-size: 9px;
+    transition: transform 150ms;
+    transform: rotate(180deg);
+  }
+  .trash-chevron.open { transform: rotate(0deg); }
+
+  .trash-files {
+    padding: 0 0 6px;
+  }
+
+  .trash-file-row {
+    opacity: 0.55;
+  }
+  .trash-file-row:hover { opacity: 1; }
+
+  .restore-btn {
+    opacity: 0;
+    transition: opacity 100ms;
+    font-size: 12px;
+    color: var(--accent);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    flex-shrink: 0;
+  }
+  .trash-file-row:hover .restore-btn { opacity: 1; }
+
   .cards-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 12px;
     padding: 16px;
     align-content: start;
+    align-items: start;
+  }
+
+  /* Focus expand: expanded card spans 2 columns, slightly larger, others dim */
+  .folder-card {
+    transition: opacity 200ms, box-shadow 200ms;
+  }
+  .folder-card.expanded {
+    grid-column: span 2;
+    box-shadow: 0 3px 16px rgba(0,0,0,0.1);
+    border-color: var(--border-strong);
+    z-index: 1;
+    padding: 14px;
+  }
+  .folder-card.expanded .card-name {
+    font-size: 14px;
+  }
+  .cards-grid.has-expanded .folder-card:not(.expanded) {
+    opacity: 0.55;
   }
 
   .drag-help {
-    padding: 12px 16px 0;
-    font-size: 12px;
+    padding: 10px 16px 0;
+    font-size: 11px;
     color: var(--text-secondary);
   }
 
@@ -958,11 +1300,39 @@
     user-select: text;
   }
 
-  .card-count {
-    display: block;
-    margin-top: 4px;
-    font-size: 11px;
+  /* Chevron toggle button (contains file count) */
+  .card-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    margin-top: 6px;
+    padding: 5px 0 0;
+    border: none;
+    border-top: 0.5px solid var(--border);
+    background: none;
+    cursor: pointer;
     color: var(--text-secondary);
+    font-size: 11px;
+    font-family: inherit;
+    line-height: 1;
+  }
+  .card-toggle:hover { color: var(--text); border-top-color: var(--border-strong); }
+
+  .chevron {
+    font-size: 9px;
+    line-height: 1;
+    flex-shrink: 0;
+    display: inline-block;
+    transform: rotate(180deg); /* collapsed = ^ rotated = v pointing down */
+    transition: transform 150ms;
+  }
+  .chevron.open {
+    transform: rotate(0deg); /* expanded = ^ pointing up */
+  }
+
+  .card-count {
+    font-size: 11px;
   }
 
   /* ── Expanded file list inside card ── */
@@ -979,6 +1349,7 @@
     padding: 3px 0;
     border-radius: 3px;
     cursor: pointer;
+    user-select: none;
     touch-action: none;
     transition: background 100ms;
   }
@@ -1011,23 +1382,25 @@
   }
   .card-file-row:hover .card-file-remove { opacity: 1; }
 
+  .card-file-trash {
+    background: none;
+    border: none;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 1px 2px;
+    opacity: 0;
+    transition: opacity 100ms;
+    flex-shrink: 0;
+    filter: grayscale(1);
+  }
+  .card-file-row:hover .card-file-trash { opacity: 0.7; filter: grayscale(0); }
+  .card-file-trash:hover { opacity: 1 !important; }
+
   .card-empty {
     margin: 4px 0 0;
     font-size: 11px;
     color: var(--text-secondary);
     font-style: italic;
-  }
-
-  /* ── Spinner overlay ── */
-  .card-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.85);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2;
   }
 
   .spinner {

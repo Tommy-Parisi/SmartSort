@@ -214,7 +214,7 @@
       </p>
 
       <div class="price-row">
-        <span class="price">$19</span>
+        <span class="price">$49</span>
         <span class="price-label">one-time · unlimited files · all future updates</span>
       </div>
 

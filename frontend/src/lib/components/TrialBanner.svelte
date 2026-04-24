@@ -5,7 +5,7 @@
 </script>
 
 <div class="trial-banner">
-  <span>Trial: sorts up to 500 files{filesRemaining !== undefined ? ` · ${filesRemaining} remaining` : ''}.</span>
+  <span>Trial: sorts up to 100 files{filesRemaining !== undefined ? ` · ${filesRemaining} remaining` : ''}.</span>
   <button class="activate-link" on:click={() => dispatch('activate')}>Activate license →</button>
 </div>
 
