@@ -227,7 +227,7 @@
         })),
       }));
 
-    expandedCardIds = new Set(); // cards start collapsed
+    expandedCardIds = new Set(previewFolders.map(f => f.cluster_id)); // cards start expanded
     displayOrder = [...previewFolders]
       .sort((a, b) => b.files.length - a.files.length)
       .map(f => f.cluster_id);
