@@ -16,13 +16,11 @@
     ]
   },
   "bundle": {
-    "active": true,
-    "resources": {
-      "../../backend/agents/*.py":   "backend/agents/",
-      "../../backend/core/*.py":     "backend/core/",
-      "../../backend/pipeline/*.py": "backend/pipeline/",
-      "../../backend/daemon/*.py":   "backend/daemon/",
-      "../../backend/__init__.py":   "backend/"
+    "active": true
+  },
+  "plugins": {
+    "shell": {
+      "open": "^((https?://)|(mailto:)|(tel:)|(/)).+"
     }
   }
 }
