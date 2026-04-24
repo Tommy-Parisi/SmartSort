@@ -78,6 +78,33 @@
 
   // ── Unsorted panel ────────────────────────────────────────────────────────
   let openUnsortedMoveFile: string | null = null;
+  let unsortedSearch = '';
+  let pinnedFilenames = new Set<string>();
+  let collapsedTypes = new Set<string>();
+  type UnsortedSortMode = 'default' | 'alpha-asc' | 'alpha-desc' | 'by-type';
+  let unsortedSortMode: UnsortedSortMode = 'default';
+
+  $: searchedUnsorted = unsortedSearch
+    ? unsortedFiles.filter(f => f.filename.toLowerCase().includes(unsortedSearch.toLowerCase()))
+    : unsortedFiles;
+  $: pinnedUnsorted   = searchedUnsorted.filter(f =>  pinnedFilenames.has(f.filename));
+  $: unpinnedUnsorted = searchedUnsorted.filter(f => !pinnedFilenames.has(f.filename));
+  $: sortedUnpinned = (() => {
+    const files = [...unpinnedUnsorted];
+    if (unsortedSortMode === 'alpha-asc')  return files.sort((a, b) => a.filename.localeCompare(b.filename));
+    if (unsortedSortMode === 'alpha-desc') return files.sort((a, b) => b.filename.localeCompare(a.filename));
+    return files;
+  })();
+  $: typeGroups = (() => {
+    if (unsortedSortMode !== 'by-type') return [] as [string, PreviewFile[]][];
+    const groups = new Map<string, PreviewFile[]>();
+    for (const f of unpinnedUnsorted) {
+      const ext = f.ext || 'other';
+      if (!groups.has(ext)) groups.set(ext, []);
+      groups.get(ext)!.push(f);
+    }
+    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  })();
 
   // ── Sort ──────────────────────────────────────────────────────────────────
   type SortMode = 'count-desc' | 'count-asc' | 'alpha-asc' | 'alpha-desc';
@@ -369,6 +396,42 @@
     flashCard(targetId);
   }
 
+  function togglePin(filename: string) {
+    if (pinnedFilenames.has(filename)) pinnedFilenames.delete(filename);
+    else pinnedFilenames.add(filename);
+    pinnedFilenames = new Set(pinnedFilenames);
+  }
+
+  function toggleTypeGroup(ext: string) {
+    if (collapsedTypes.has(ext)) collapsedTypes.delete(ext);
+    else collapsedTypes.add(ext);
+    collapsedTypes = new Set(collapsedTypes);
+  }
+
+  function moveUnsortedUp(file: PreviewFile) {
+    if (unsortedSortMode !== 'default' || unsortedSearch) return;
+    const unpinned = unsortedFiles.filter(f => !pinnedFilenames.has(f.filename));
+    const idx = unpinned.findIndex(f => f.filename === file.filename);
+    if (idx <= 0) return;
+    const arr = [...unsortedFiles];
+    const aIdx = arr.findIndex(f => f.filename === unpinned[idx].filename);
+    const bIdx = arr.findIndex(f => f.filename === unpinned[idx - 1].filename);
+    [arr[aIdx], arr[bIdx]] = [arr[bIdx], arr[aIdx]];
+    unsortedFiles = arr;
+  }
+
+  function moveUnsortedDown(file: PreviewFile) {
+    if (unsortedSortMode !== 'default' || unsortedSearch) return;
+    const unpinned = unsortedFiles.filter(f => !pinnedFilenames.has(f.filename));
+    const idx = unpinned.findIndex(f => f.filename === file.filename);
+    if (idx < 0 || idx >= unpinned.length - 1) return;
+    const arr = [...unsortedFiles];
+    const aIdx = arr.findIndex(f => f.filename === unpinned[idx].filename);
+    const bIdx = arr.findIndex(f => f.filename === unpinned[idx + 1].filename);
+    [arr[aIdx], arr[bIdx]] = [arr[bIdx], arr[aIdx]];
+    unsortedFiles = arr;
+  }
+
   // ── Pointer drag: source ─────────────────────────────────────────────────
   function onFilePointerDown(e: PointerEvent, file: PreviewFile) {
     if (e.button !== 0) return;
@@ -597,43 +660,111 @@
       data-unsorted-drop="true"
       class:drag-over={dragOverUnsorted}
     >
-      <p class="panel-header">unsorted · {unsortedFiles.length} files</p>
+      <!-- Header + controls -->
+      <div class="unsorted-header">
+        <span class="unsorted-title">unsorted · {unsortedFiles.length} files</span>
+        <div class="unsorted-controls">
+          <input
+            class="unsorted-search"
+            type="text"
+            placeholder="Search…"
+            bind:value={unsortedSearch}
+            on:pointerdown|stopPropagation
+          />
+          <div class="sort-bar compact">
+            <button class="sort-btn" class:active={unsortedSortMode === 'default'}    on:click={() => unsortedSortMode = 'default'}    title="Default order">—</button>
+            <button class="sort-btn" class:active={unsortedSortMode === 'alpha-asc'}  on:click={() => unsortedSortMode = 'alpha-asc'}  title="A → Z">A→Z</button>
+            <button class="sort-btn" class:active={unsortedSortMode === 'alpha-desc'} on:click={() => unsortedSortMode = 'alpha-desc'} title="Z → A">Z→A</button>
+            <button class="sort-btn" class:active={unsortedSortMode === 'by-type'}    on:click={() => unsortedSortMode = 'by-type'}    title="Group by type">Type</button>
+          </div>
+        </div>
+      </div>
+
       <div class="panel-scroll">
         {#if unsortedFiles.length === 0}
           <p class="empty-state">{dragOverUnsorted ? 'Drop to unsort' : 'All files sorted'}</p>
+        {:else if searchedUnsorted.length === 0}
+          <p class="empty-state">No matches</p>
         {:else}
-          {#each unsortedFiles as file (file.filename)}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="file-row"
-              class:pointer-dragging={draggedFile?.filename === file.filename}
-              on:pointerdown={e => onFilePointerDown(e, file)}
-            >
-              <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-              <span class="file-name">{trunc(file.filename, 24)}</span>
-              {#if openUnsortedMoveFile === file.filename}
-                <select
-                  class="move-select"
-                  on:pointerdown|stopPropagation
-                  on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)}
-                  on:blur={() => (openUnsortedMoveFile = null)}
-                >
-                  <option value="" disabled selected>Move to…</option>
-                  {#each sortedPreviewFolders as dest}
-                    <option value={String(dest.cluster_id)}>{dest.name}</option>
-                  {/each}
-                </select>
-              {:else}
-                <button
-                  class="move-btn"
-                  type="button"
-                  on:pointerdown|stopPropagation
-                  on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)}
-                  title="Move to folder"
-                >→</button>
+
+          <!-- Pinned files -->
+          {#if pinnedUnsorted.length > 0}
+            <p class="section-label">Pinned</p>
+            {#each pinnedUnsorted as file (file.filename)}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="file-row pinned-row"
+                class:pointer-dragging={draggedFile?.filename === file.filename}
+                on:pointerdown={e => onFilePointerDown(e, file)}
+              >
+                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                <span class="file-name">{trunc(file.filename, 19)}</span>
+                <button class="pin-btn pinned" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Unpin">📌</button>
+                {#if openUnsortedMoveFile === file.filename}
+                  <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
+                    <option value="" disabled selected>Move to…</option>
+                    {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
+                  </select>
+                {:else}
+                  <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
+                {/if}
+              </div>
+            {/each}
+            <div class="section-divider"></div>
+          {/if}
+
+          <!-- By-type grouped view -->
+          {#if unsortedSortMode === 'by-type'}
+            {#each typeGroups as [ext, files] (ext)}
+              <button class="type-group-header" type="button" on:click={() => toggleTypeGroup(ext)}>
+                <span class="ext-badge sm" style={extStyle(ext)}>{ext || '?'}</span>
+                <span class="type-group-label">{files.length} {files.length === 1 ? 'file' : 'files'}</span>
+                <span class="chevron" class:open={!collapsedTypes.has(ext)}>^</span>
+              </button>
+              {#if !collapsedTypes.has(ext)}
+                {#each files as file (file.filename)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
+                    <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                    <span class="file-name">{trunc(file.filename, 19)}</span>
+                    <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top">📌</button>
+                    {#if openUnsortedMoveFile === file.filename}
+                      <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
+                        <option value="" disabled selected>Move to…</option>
+                        {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
+                      </select>
+                    {:else}
+                      <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
+                    {/if}
+                  </div>
+                {/each}
               {/if}
-            </div>
-          {/each}
+            {/each}
+
+          <!-- Default / alpha sorted view -->
+          {:else}
+            {#each sortedUnpinned as file, i (file.filename)}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
+                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                <span class="file-name">{trunc(file.filename, 17)}</span>
+                {#if unsortedSortMode === 'default' && !unsortedSearch}
+                  <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedUp(file)}   disabled={i === 0}                         title="Move up">↑</button>
+                  <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedDown(file)} disabled={i === sortedUnpinned.length - 1} title="Move down">↓</button>
+                {/if}
+                <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top">📌</button>
+                {#if openUnsortedMoveFile === file.filename}
+                  <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
+                    <option value="" disabled selected>Move to…</option>
+                    {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
+                  </select>
+                {:else}
+                  <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
+                {/if}
+              </div>
+            {/each}
+          {/if}
+
         {/if}
       </div>
 
@@ -902,18 +1033,6 @@
     min-height: 0;
   }
 
-  .panel-header {
-    margin: 0;
-    padding: 10px 14px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-    border-bottom: 0.5px solid var(--border);
-  }
-
   .panel-scroll {
     flex: 1;
     overflow-y: auto;
@@ -954,8 +1073,8 @@
   .left-panel.drag-over {
     background: var(--accent-bg);
   }
-  /* extend the drag-over tint to the header too */
-  .left-panel.drag-over .panel-header {
+  /* extend the drag-over tint to the unsorted header too */
+  .left-panel.drag-over .unsorted-header {
     border-bottom-color: var(--accent);
   }
 
@@ -1018,6 +1137,123 @@
     cursor: pointer;
     flex-shrink: 0;
   }
+
+  /* ── Unsorted panel header + controls ── */
+  .unsorted-header {
+    flex-shrink: 0;
+    border-bottom: 0.5px solid var(--border);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .unsorted-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    padding: 0 4px;
+  }
+
+  .unsorted-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .unsorted-search {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    font-family: inherit;
+    border: 0.5px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 4px 8px;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+  }
+  .unsorted-search:focus { border-color: var(--accent); }
+  .unsorted-search::placeholder { color: var(--text-secondary); opacity: 0.7; }
+
+  /* Compact sort bar in unsorted panel */
+  .sort-bar.compact .sort-btn {
+    font-size: 10px;
+    padding: 2px 5px;
+  }
+
+  /* Pinned section */
+  .section-label {
+    margin: 0;
+    padding: 5px 14px 2px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    opacity: 0.55;
+  }
+
+  .section-divider {
+    height: 0.5px;
+    background: var(--border);
+    margin: 4px 12px 2px;
+  }
+
+  .pinned-row { background: rgba(0, 0, 0, 0.02); }
+
+  .pin-btn {
+    opacity: 0;
+    transition: opacity 100ms;
+    font-size: 11px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 2px;
+    flex-shrink: 0;
+    filter: grayscale(1);
+    line-height: 1;
+  }
+  .file-row:hover .pin-btn { opacity: 0.55; }
+  .pin-btn.pinned { opacity: 1; filter: grayscale(0); }
+  .pin-btn:hover { opacity: 1 !important; filter: grayscale(0); }
+
+  /* Type group header */
+  .type-group-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: none;
+    border: none;
+    border-bottom: 0.5px solid var(--border);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--text-secondary);
+    text-align: left;
+  }
+  .type-group-header:hover { background: var(--bg-secondary); color: var(--text); }
+  .type-group-label { flex: 1; }
+
+  /* Up/down order buttons */
+  .order-btn {
+    opacity: 0;
+    transition: opacity 100ms;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 1px 2px;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .file-row:hover .order-btn { opacity: 1; }
+  .order-btn:disabled { opacity: 0.18 !important; cursor: not-allowed; }
 
   /* ── Ext badge ── */
   .ext-badge {
