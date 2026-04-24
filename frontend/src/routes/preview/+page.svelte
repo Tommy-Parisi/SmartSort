@@ -5,6 +5,7 @@
   import type { PreviewFolder, PreviewFile } from '$lib/stores/sort';
   import { tauriConfirmSort, tauriReassignFiles, tauriGetFilePreview } from '$lib/tauri';
   import type { FilePreview } from '$lib/tauri';
+  import { open as shellOpen } from '@tauri-apps/plugin-shell';
 
   let store = $sortStore;
   $: store = $sortStore;
@@ -28,17 +29,24 @@
   let filePreview: FilePreview | null = null;
   let loadingPreview = false;
   let textContent = '';
+  let previewFilePath = '';
 
   async function showFilePreview(file: PreviewFile) {
     if (!store.selectedFolder) return;
+    previewFilePath = `${store.selectedFolder}/${file.filename}`;
     previewingFile = file;
     loadingPreview = true;
     filePreview = null;
     textContent = '';
 
+    // PDFs can't render via data URI in WKWebView — open system viewer instead.
+    if (file.ext === 'pdf') {
+      loadingPreview = false;
+      return; // modal will show the PDF placeholder
+    }
+
     try {
-      const filePath = `${store.selectedFolder}/${file.filename}`;
-      filePreview = await tauriGetFilePreview(filePath);
+      filePreview = await tauriGetFilePreview(previewFilePath);
       
       if (filePreview.mime_type === 'text/plain') {
         textContent = atob(filePreview.data);
@@ -976,16 +984,22 @@
         <button class="close-btn" on:click={closePreview}>×</button>
       </div>
       <div class="modal-body">
-        {#if loadingPreview}
+        {#if previewingFile?.ext === 'pdf'}
+          <div class="pdf-placeholder">
+            <svg viewBox="0 0 48 48" fill="none" class="pdf-icon-large"><rect x="6" y="2" width="30" height="38" rx="3" fill="#FAECE7" stroke="#712B13" stroke-width="1.5"/><rect x="6" y="2" width="30" height="38" rx="3" fill="#FAECE7"/><path d="M12 16h24M12 22h24M12 28h16" stroke="#712B13" stroke-width="1.5" stroke-linecap="round"/><path d="M30 2v10h10" fill="#f5cfc5" stroke="#712B13" stroke-width="1.2"/></svg>
+            <p class="pdf-filename">{previewingFile.filename}</p>
+            <button class="btn-open-external" on:click={() => shellOpen(previewFilePath)}>
+              Open in Preview →
+            </button>
+          </div>
+        {:else if loadingPreview}
           <div class="loading-state">
             <div class="spinner"></div>
             <span>Loading preview…</span>
           </div>
         {:else if filePreview}
           {#if filePreview.mime_type.startsWith('image/')}
-            <img class="preview-media" src={`data:${filePreview.mime_type};base64,${filePreview.data}`} alt={previewingFile.filename} />
-          {:else if filePreview.mime_type === 'application/pdf'}
-            <iframe class="preview-media" title="PDF Preview" src={`data:application/pdf;base64,${filePreview.data}`}></iframe>
+            <img class="preview-media" src={`data:${filePreview.mime_type};base64,${filePreview.data}`} alt={previewingFile?.filename} />
           {:else if filePreview.mime_type === 'text/plain'}
             <pre class="preview-text">{textContent || 'Empty file.'}</pre>
           {:else}
@@ -1803,6 +1817,40 @@
     font-size: 13px;
     text-align: center;
   }
+
+  .pdf-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 40px 20px;
+  }
+
+  .pdf-icon-large {
+    width: 64px;
+    height: 64px;
+    opacity: 0.85;
+  }
+
+  .pdf-filename {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
+    word-break: break-all;
+  }
+
+  .btn-open-external {
+    padding: 8px 20px;
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-open-external:hover { opacity: 0.85; }
 
   .preview-text {
     margin: 0;

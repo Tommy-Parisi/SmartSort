@@ -534,12 +534,21 @@ pub async fn get_file_preview(file_path: String) -> Result<FilePreview, String> 
 
     let mut file = std::fs::File::open(&file_path)
         .map_err(|e| format!("Failed to open file: {}", e))?;
-    
-    // For images, we might want the whole thing if it's small, or just a chunk.
-    // For now, let's read up to 1MB for preview.
+
+    let is_text = matches!(ext.as_str(),
+        "txt" | "md" | "js" | "ts" | "py" | "json" | "rs" | "css" | "html"
+        | "jsx" | "tsx" | "csv" | "sh" | "yaml" | "yml"
+    );
     let mut buffer = Vec::new();
-    let _ = file.take(1_000_000).read_to_end(&mut buffer)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    if is_text {
+        // Cap text previews at 200 KB — enough to show content without blowing memory.
+        let _ = file.take(200_000).read_to_end(&mut buffer)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+    } else {
+        // Images must be read in full — a truncated JPEG renders as a partial image.
+        file.read_to_end(&mut buffer)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+    }
 
     let mime_type = match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
