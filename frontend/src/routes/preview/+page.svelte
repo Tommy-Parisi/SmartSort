@@ -114,6 +114,15 @@
     return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
   })();
 
+  // ── Pinned clusters ───────────────────────────────────────────────────────
+  let pinnedClusterIds = new Set<number>();
+
+  function toggleClusterPin(id: number) {
+    if (pinnedClusterIds.has(id)) pinnedClusterIds.delete(id);
+    else pinnedClusterIds.add(id);
+    pinnedClusterIds = new Set(pinnedClusterIds);
+  }
+
   // ── Sort ──────────────────────────────────────────────────────────────────
   type SortMode = 'count-desc' | 'count-asc' | 'alpha-asc' | 'alpha-desc';
   let sortMode: SortMode = 'count-desc';
@@ -399,6 +408,8 @@
       );
 
     displayOrder = displayOrder.filter(id => id !== sourceId);
+    pinnedClusterIds.delete(sourceId);
+    pinnedClusterIds = new Set(pinnedClusterIds);
     expandedCardIds.delete(sourceId);
     expandedCardIds = new Set([...expandedCardIds, targetId]);
     flashCard(targetId);
@@ -522,6 +533,8 @@
         trashedFiles = [...trashedFiles, ...draggedFolder.files.map(f => ({ ...f, currentClusterId: null }))];
         previewFolders = previewFolders.filter(f => f.cluster_id !== id);
         displayOrder   = displayOrder.filter(did => did !== id);
+        pinnedClusterIds.delete(id);
+        pinnedClusterIds = new Set(pinnedClusterIds);
         expandedCardIds.delete(id);
         expandedCardIds = new Set(expandedCardIds);
       } else if (dragOverFolderId !== null && dragOverFolderId !== draggedFolder.cluster_id) {
@@ -585,6 +598,8 @@
     // Remove folder from display immediately
     previewFolders = previewFolders.filter(f => f.cluster_id !== id);
     displayOrder = displayOrder.filter(did => did !== id);
+    pinnedClusterIds.delete(id);
+    pinnedClusterIds = new Set(pinnedClusterIds);
     expandedCardIds.delete(id);
     expandedCardIds = new Set(expandedCardIds);
 
@@ -849,6 +864,25 @@
           ↩ Undo{#if undoStack.length > 0}<span class="undo-count">{undoStack.length}</span>{/if}
         </button>
       </div>
+      <!-- Pinned clusters strip -->
+      {#if pinnedClusterIds.size > 0}
+        <div class="pinned-strip">
+          {#each sortedPreviewFolders.filter(f => pinnedClusterIds.has(f.cluster_id)) as folder (folder.cluster_id)}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="pin-chip"
+              class:drag-over={dragOverFolderId === folder.cluster_id}
+              data-folder-drop={folder.cluster_id}
+            >
+              <svg class="pin-chip-icon" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg>
+              <span class="pin-chip-name">{folder.name}</span>
+              <span class="pin-chip-count">{folder.files.length}</span>
+              <button class="pin-chip-unpin" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => toggleClusterPin(folder.cluster_id)} title="Unpin">×</button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
       <div class="panel-scroll">
         <div class="drag-help">
           Drag files or folders to reorganize. Drag to 🗑 to permanently delete on confirm.
@@ -877,6 +911,16 @@
                   tabindex="-1"
                   title="Delete folder"
                 >×</button>
+
+                <!-- Pin -->
+                <button
+                  class="card-pin pe-auto"
+                  class:is-pinned={pinnedClusterIds.has(folder.cluster_id)}
+                  type="button"
+                  on:pointerdown|stopPropagation
+                  on:click|stopPropagation={() => toggleClusterPin(folder.cluster_id)}
+                  title={pinnedClusterIds.has(folder.cluster_id) ? 'Unpin folder' : 'Pin folder'}
+                ><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
 
                 <!-- Folder name (click to rename) -->
                 {#if editingCardId === folder.cluster_id}
@@ -1521,6 +1565,95 @@
     transition: opacity 100ms;
   }
   .folder-card:hover .card-delete { opacity: 1; }
+
+  /* ── Card pin button ── */
+  .card-pin {
+    position: absolute;
+    top: 6px;
+    right: 22px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 2px;
+    opacity: 0;
+    transition: opacity 100ms;
+    color: #b8a030;
+    display: flex;
+    align-items: center;
+  }
+  .folder-card:hover .card-pin { opacity: 0.45; }
+  .card-pin.is-pinned { opacity: 1; }
+  .card-pin:hover { opacity: 1 !important; }
+
+  /* ── Pinned strip ── */
+  .pinned-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 0.5px solid var(--border);
+    flex-shrink: 0;
+    background: var(--bg);
+  }
+
+  .pin-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px 4px 7px;
+    background: var(--bg-secondary);
+    border: 0.5px solid var(--border-strong);
+    border-radius: 20px;
+    font-size: 11px;
+    color: var(--text);
+    cursor: default;
+    transition: transform 150ms, border-color 150ms, background 150ms, box-shadow 150ms;
+    user-select: none;
+  }
+  .pin-chip.drag-over {
+    transform: scale(1.07);
+    border-color: var(--accent);
+    background: var(--accent-bg);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+
+  .pin-chip-icon {
+    width: 10px;
+    height: 10px;
+    color: #b8a030;
+    flex-shrink: 0;
+  }
+
+  .pin-chip-name {
+    font-weight: 500;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pin-chip-count {
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--border);
+    padding: 1px 5px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  .pin-chip-unpin {
+    background: none;
+    border: none;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 0 0 1px;
+    opacity: 0;
+    transition: opacity 100ms;
+    flex-shrink: 0;
+  }
+  .pin-chip:hover .pin-chip-unpin { opacity: 1; }
 
   /* ── Card name ── */
   .card-name {
