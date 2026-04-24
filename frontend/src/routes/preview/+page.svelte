@@ -699,7 +699,7 @@
               >
                 <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
                 <span class="file-name">{trunc(file.filename, 19)}</span>
-                <button class="pin-btn pinned" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Unpin">📌</button>
+                <button class="pin-btn pinned" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Unpin"><svg class="pin-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 2.5L13.5 6.5L10 8.5L10 11L6 11L6 8.5L2.5 6.5L6.5 2.5L9.5 2.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/><line x1="8" y1="11" x2="8" y2="14.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
                 {#if openUnsortedMoveFile === file.filename}
                   <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
                     <option value="" disabled selected>Move to…</option>
@@ -727,7 +727,7 @@
                   <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
                     <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
                     <span class="file-name">{trunc(file.filename, 19)}</span>
-                    <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top">📌</button>
+                    <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 2.5L13.5 6.5L10 8.5L10 11L6 11L6 8.5L2.5 6.5L6.5 2.5L9.5 2.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/><line x1="8" y1="11" x2="8" y2="14.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
                     {#if openUnsortedMoveFile === file.filename}
                       <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
                         <option value="" disabled selected>Move to…</option>
@@ -752,7 +752,7 @@
                   <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedUp(file)}   disabled={i === 0}                         title="Move up">↑</button>
                   <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedDown(file)} disabled={i === sortedUnpinned.length - 1} title="Move down">↓</button>
                 {/if}
-                <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top">📌</button>
+                <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 2.5L13.5 6.5L10 8.5L10 11L6 11L6 8.5L2.5 6.5L6.5 2.5L9.5 2.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/><line x1="8" y1="11" x2="8" y2="14.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
                 {#if openUnsortedMoveFile === file.filename}
                   <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
                     <option value="" disabled selected>Move to…</option>
@@ -1207,18 +1207,23 @@
   .pin-btn {
     opacity: 0;
     transition: opacity 100ms;
-    font-size: 11px;
     background: none;
     border: none;
     cursor: pointer;
     padding: 2px 2px;
     flex-shrink: 0;
-    filter: grayscale(1);
     line-height: 1;
+    color: #b8a030;
+    display: flex;
+    align-items: center;
   }
-  .file-row:hover .pin-btn { opacity: 0.55; }
-  .pin-btn.pinned { opacity: 1; filter: grayscale(0); }
-  .pin-btn:hover { opacity: 1 !important; filter: grayscale(0); }
+  .pin-icon {
+    width: 11px;
+    height: 11px;
+  }
+  .file-row:hover .pin-btn { opacity: 0.45; }
+  .pin-btn.pinned { opacity: 1; }
+  .pin-btn:hover { opacity: 1 !important; }
 
   /* Type group header */
   .type-group-header {
