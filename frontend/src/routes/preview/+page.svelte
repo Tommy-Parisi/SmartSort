@@ -1496,7 +1496,7 @@
     transition: opacity 200ms, box-shadow 200ms;
   }
   .folder-card.expanded {
-    grid-column: span 2;
+    grid-column: 1 / -1;
     box-shadow: 0 3px 16px rgba(0,0,0,0.1);
     border-color: var(--border-strong);
     z-index: 1;
