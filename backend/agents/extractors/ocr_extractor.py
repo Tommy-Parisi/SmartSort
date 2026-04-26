@@ -10,13 +10,42 @@ _HEIC_EXTS = {".heic", ".heif"}
 _OCR_TOKEN_THRESHOLD = 8
 _PHOTO_FALLBACK_MIN_TOKENS = 5
 
+CREATIVE_SOFTWARE = {
+    'figma', 'sketch', 'adobe', 'illustrator', 'photoshop', 'canva',
+    'screenshot', 'snagit', 'snip', 'grab', 'greenshot', 'lightshot',
+    'chrome', 'safari', 'firefox', 'preview', 'keynote', 'powerpoint',
+}
 
-def _date_bucket(file_path: Path) -> str:
+
+def _is_creative_export(exif_parts: list[str]) -> bool:
+    for item in exif_parts:
+        if item.startswith("Software:"):
+            software = item.split(":", 1)[1].strip().lower()
+            return any(s in software for s in CREATIVE_SOFTWARE)
+    return False
+
+
+def _get_exif_date_bucket(exif_parts: list[str]) -> str | None:
+    """Return year_month or year string from EXIF datetime, or None if absent."""
+    raw = None
+    for item in exif_parts:
+        if item.startswith("DateTimeOriginal:"):
+            raw = item.split(":", 1)[1].strip()
+            break
+        if item.startswith("DateTime:"):
+            raw = item.split(":", 1)[1].strip()
+    if not raw:
+        return None
     try:
-        dt = datetime.fromtimestamp(file_path.stat().st_mtime)
-        return f"photo {dt.strftime('%B').lower()} {dt.year}"
+        # EXIF format: "YYYY:MM:DD HH:MM:SS"
+        dt = datetime.strptime(raw[:10], "%Y:%m:%d")
+        now = datetime.now()
+        if (now - dt).days < 730:
+            return dt.strftime("%Y_%m")
+        else:
+            return dt.strftime("%Y")
     except Exception:
-        return f"photo {clean_filename_stem(str(file_path))}"
+        return None
 
 
 def _read_pil_exif(file_path: Path) -> list[str]:
@@ -75,33 +104,20 @@ def _ocr_token_count(text: str) -> int:
     return len([tok for tok in text.split() if len(tok) > 1])
 
 
-def _photo_identity(file_path: Path, exif_parts: list[str]) -> str:
+def _creative_identity(file_path: Path, exif_parts: list[str]) -> str:
     stem = clean_filename_stem(str(file_path))
-    parts: list[str] = ["photo"]
-
-    make_model = []
+    software = ""
     for item in exif_parts:
-        if item.startswith("Make:") or item.startswith("Model:"):
-            make_model.append(item.split(":", 1)[1].strip())
-
-    description = next(
-        (item.split(":", 1)[1].strip() for item in exif_parts if item.startswith("ImageDescription:")),
-        "",
-    )
-
-    bucket = _date_bucket(file_path)
-    parts.append(bucket)
-    if make_model:
-        parts.extend(make_model[:2])
-    if description:
-        parts.append(description)
-    elif stem:
+        if item.startswith("Software:"):
+            software = item.split(":", 1)[1].strip()
+            break
+    label = "screenshot" if "screenshot" in software.lower() else "design export"
+    parts = [label]
+    if software:
+        parts.append(software)
+    if stem:
         parts.append(stem)
-
-    result = token_cap(" ".join(parts))
-    if len(result.split()) < _PHOTO_FALLBACK_MIN_TOKENS:
-        return token_cap(f"{bucket} {stem}")
-    return result
+    return token_cap(" ".join(parts))
 
 
 class OCRExtractorAgent:
@@ -116,6 +132,7 @@ class OCRExtractorAgent:
         except Exception:
             exif_parts = []
 
+        # OCR first — readable images embed normally regardless of EXIF
         ocr_text = _ocr_text(p)
         if _ocr_token_count(ocr_text) >= _OCR_TOKEN_THRESHOLD:
             stem = clean_filename_stem(file_path)
@@ -123,4 +140,14 @@ class OCRExtractorAgent:
                 return token_cap(f"scanned document {stem} {ocr_text}")
             return token_cap(f"scanned document {ocr_text}")
 
-        return _photo_identity(p, exif_parts)
+        # Tier 1: Creative software export → embed, cluster with related docs
+        if _is_creative_export(exif_parts):
+            return _creative_identity(p, exif_parts)
+
+        # Tier 2: Camera photo with EXIF datetime → photo bucket
+        date_bucket = _get_exif_date_bucket(exif_parts)
+        if date_bucket:
+            return f"__PHOTO__{date_bucket}"
+
+        # Tier 3: No usable EXIF
+        return "__PHOTO__unknown"

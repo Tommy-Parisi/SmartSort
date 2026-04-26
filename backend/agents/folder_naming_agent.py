@@ -31,10 +31,22 @@ _TOO_GENERIC = {
 }
 
 ALWAYS_STRIP = {
-    "google", "docs", "sheets", "slides", "microsoft", "word",
-    "pdf", "docx", "file", "document", "new", "copy", "final",
+    "google", "docs", "sheets", "slides", "microsoft", "word", "excel",
+    "pdf", "docx", "file", "document", "documents", "new", "copy", "final",
     "draft", "version", "untitled", "readme", "index", "main",
+    "page", "pages", "http", "https", "www", "com", "org", "edu",
+    "img", "image", "images", "photo", "scanned", "scan", "screenshot",
+    "jpeg", "jpg", "png", "heic", "gif", "svg", "webp",
+    "series",
 }
+
+# Stems that carry no semantic meaning — camera rolls, phone defaults, pure numbers
+_NONSEMANTIC_STEM_RE = re.compile(
+    r'^(?:img|dsc|dscn|dcim|pic|pxl|cam|wp|vlcsnap|signal|received|capture|'
+    r'snapshot|photo|screen.?shot|screenshot|image|screenshot)[_\-\s]?\d*$'
+    r'|\d+(\s*\(\d+\))?$',
+    re.IGNORECASE,
+)
 
 EXTENSION_LABELS = {
     "pdf": "documents",
@@ -112,6 +124,10 @@ def _ngrams(tokens: List[str], n: int) -> List[Tuple[str, ...]]:
 
 
 def is_filename_proper_noun(token: str, filenames: List[str]) -> bool:
+    """True if the token appears in only one filename, is capitalised there, and is long enough
+    to be a document title word rather than a shared subject keyword."""
+    if len(token) <= 3:
+        return False
     appearances = 0
     capitalized_match = False
     token_lower = token.lower()
@@ -121,7 +137,7 @@ def is_filename_proper_noun(token: str, filenames: List[str]) -> bool:
             appearances += 1
             if any(part.lower() == token_lower and part[:1].isupper() for part in parts):
                 capitalized_match = True
-    return appearances == 1 and capitalized_match
+    return appearances <= 1 and capitalized_match
 
 
 def _strip_label_noise(words: List[str], filenames: List[str]) -> List[str]:
@@ -133,6 +149,20 @@ def _strip_label_noise(words: List[str], filenames: List[str]) -> List[str]:
             continue
         cleaned.append(word)
     return cleaned
+
+
+def _is_all_images_no_semantic_names(files: List[ClusteredFile]) -> bool:
+    """True when every file is an image with a non-semantic filename (camera roll, numeric, etc.)."""
+    if not files:
+        return False
+    for f in files:
+        if f.file_meta.detected_type != "image":
+            return False
+        stem = os.path.splitext(f.file_meta.file_name)[0]
+        stem_clean = re.sub(r"[_\-\s]+", "", stem)
+        if not _NONSEMANTIC_STEM_RE.match(stem_clean):
+            return False
+    return True
 
 
 def _dominant_extension(files: List[ClusteredFile]) -> str:
@@ -233,7 +263,7 @@ def _common_prefix_label(files: List[ClusteredFile]) -> str:
     prefix = os.path.commonprefix(stems).strip()
     prefix = re.sub(r"[\s_\-]+$", "", prefix)   # strip trailing separators
     if len(prefix) >= 2:
-        return _sanitize_label(prefix + " Series")
+        return _sanitize_label(prefix)
     return ""
 
 
@@ -255,7 +285,7 @@ def _filename_fallback(files: List[ClusteredFile]) -> str:
         return _sanitize_label(" ".join(filtered[:2]))
     if filtered:
         return _sanitize_label(f"{filtered[0]} {_dominant_extension(files)}")
-    return ""
+    return _sanitize_label(f"{_dominant_extension(files)} files")
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
@@ -309,8 +339,11 @@ class FolderNamingAgent:
                         len((f.raw_text or "").split()) for f in files
                     ) / max(len(files), 1)
 
+                    # 0. All-image clusters with non-semantic filenames: don't hallucinate
+                    if _is_all_images_no_semantic_names(files):
+                        label = "Images"
                     # 1. Short numeric-series clusters: common filename prefix wins
-                    if avg_tokens < 10:
+                    elif avg_tokens < 10:
                         label = _common_prefix_label(files)
                     else:
                         label = ""

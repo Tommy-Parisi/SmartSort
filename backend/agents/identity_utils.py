@@ -3,19 +3,26 @@ from pathlib import Path
 
 FILENAME_NOISE = [
     " - Google Docs", " - Google Sheets", " - Google Slides",
-    " - Microsoft Word", " - OneDrive", " - Dropbox",
-    "_final", "_v2", "_draft", " copy", " (1)", " (2)",
+    " - Google Drive", " - Microsoft Word", " - OneDrive", " - Dropbox",
+    "_final", "_v2", "_v3", "_draft", "_copy",
+    " copy", " (1)", " (2)", " (3)",
+    " final", " draft", " FINAL", " DRAFT", "- Copy",
 ]
 
 DOCTYPE_HINTS = {
-    "resume": ["resume", "cv", "curriculum vitae"],
-    "cover letter": ["cover letter", "covering letter"],
-    "lecture": ["lecture", "week ", "class ", "slides"],
-    "assignment": ["assignment", "homework", "problem set", "ps1", "ps2"],
-    "cheat sheet": ["cheat sheet", "reference", "quick guide"],
-    "report": ["report", "assessment", "reflection", "analysis"],
-    "agreement": ["agreement", "contract", "terms", "policy", "plan"],
-    "research": ["research", "paper", "thesis", "dissertation", "draft"],
+    "resume": ["resume", "cv", "curriculum vitae", "work experience", "skills summary"],
+    "cover letter": ["cover letter", "covering letter", "dear hiring", "dear recruiter"],
+    "lecture": ["lecture", "week ", "class notes", "course notes", "slides"],
+    "assignment": ["assignment", "homework", "problem set", "ps1", "ps2", "ps3",
+                   "ps4", "ps5", "lab report", "submission"],
+    "cheat sheet": ["cheat sheet", "reference sheet", "quick reference", "formula sheet"],
+    "report": ["report", "assessment", "reflection", "analysis", "evaluation"],
+    "agreement": ["agreement", "contract", "terms of service", "terms and conditions",
+                  "policy", "health plan", "user agreement", "waiver"],
+    "research": ["research paper", "thesis", "dissertation", "literature review",
+                 "abstract", "methodology", "hypothesis"],
+    "invoice": ["invoice", "receipt", "billing", "payment", "order confirmation"],
+    "notes": ["notes", "summary", "overview", "key points", "takeaways"],
 }
 
 
@@ -32,7 +39,7 @@ def clean_filename_stem(file_path: str) -> str:
 
 
 def infer_doctype(filename: str, content: str) -> str | None:
-    combined = (filename + " " + content[:200]).lower()
+    combined = (filename + " " + content[:300]).lower()
     for doctype, hints in DOCTYPE_HINTS.items():
         if any(h in combined for h in hints):
             return doctype

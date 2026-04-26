@@ -11,7 +11,7 @@ from ..core.utils import log_error
 from .identity_utils import extract_prefixed_doctype
 
 class SemanticClusterer:
-    def __init__(self, fallback_k_range=(2, 10), min_cluster_size=3):
+    def __init__(self, fallback_k_range=(2, 10), min_cluster_size=2):
         self.fallback_k_range = fallback_k_range
         self.min_cluster_size = min_cluster_size
 
@@ -22,7 +22,7 @@ class SemanticClusterer:
             distance_matrix = cosine_distances(X)
 
             import hdbscan
-            hdb = hdbscan.HDBSCAN(metric='precomputed', min_cluster_size=self.min_cluster_size)
+            hdb = hdbscan.HDBSCAN(metric='precomputed', min_cluster_size=self.min_cluster_size, min_samples=1)
             labels = hdb.fit_predict(distance_matrix)
 
             n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
@@ -74,7 +74,7 @@ class SemanticClusterer:
 
 
 class ClusteringAgent:
-    def __init__(self, fallback_k_range=(2, 10), min_cluster_size=3):
+    def __init__(self, fallback_k_range=(2, 10), min_cluster_size=2):
         from sentence_transformers import SentenceTransformer
         self.name_embedder = SentenceTransformer("all-MiniLM-L6-v2")
         self.clusterer = SemanticClusterer(
