@@ -91,6 +91,13 @@
   let collapsedTypes = new Set<string>();
   type UnsortedSortMode = 'default' | 'alpha-asc' | 'alpha-desc' | 'by-type';
   let unsortedSortMode: UnsortedSortMode = 'default';
+  let unsortedCollapsed = true;
+  let _prevUnsortedLen = 0;
+  // Auto-expand whenever a file enters the unsorted panel
+  $: {
+    if (unsortedFiles.length > _prevUnsortedLen) unsortedCollapsed = false;
+    _prevUnsortedLen = unsortedFiles.length;
+  }
 
   $: searchedUnsorted = unsortedSearch
     ? unsortedFiles.filter(f => f.filename.toLowerCase().includes(unsortedSearch.toLowerCase()))
@@ -683,23 +690,35 @@
       data-unsorted-drop="true"
       class:drag-over={dragOverUnsorted}
     >
-      <!-- Header + controls -->
-      <div class="unsorted-header">
+      <!-- Header — always visible, click to collapse/expand -->
+      <button
+        class="unsorted-header"
+        type="button"
+        on:click={() => (unsortedCollapsed = !unsortedCollapsed)}
+        on:pointerdown|stopPropagation
+      >
         <span class="unsorted-title">unsorted · {unsortedFiles.length} files</span>
-        <div class="unsorted-controls">
-          <input
-            class="unsorted-search"
-            type="text"
-            placeholder="Search…"
-            bind:value={unsortedSearch}
-            on:pointerdown|stopPropagation
-          />
-          <div class="sort-bar compact">
-            <button class="sort-btn" class:active={unsortedSortMode === 'default'}    on:click={() => unsortedSortMode = 'default'}    title="Default order">—</button>
-            <button class="sort-btn" class:active={unsortedSortMode === 'alpha-asc'}  on:click={() => unsortedSortMode = 'alpha-asc'}  title="A → Z">A→Z</button>
-            <button class="sort-btn" class:active={unsortedSortMode === 'alpha-desc'} on:click={() => unsortedSortMode = 'alpha-desc'} title="Z → A">Z→A</button>
-            <button class="sort-btn" class:active={unsortedSortMode === 'by-type'}    on:click={() => unsortedSortMode = 'by-type'}    title="Group by type">Type</button>
-          </div>
+        {#if dragOverUnsorted && unsortedCollapsed}
+          <span class="drop-hint">drop here</span>
+        {/if}
+        <span class="chevron" class:open={!unsortedCollapsed}>^</span>
+      </button>
+
+      {#if !unsortedCollapsed}
+      <!-- Controls -->
+      <div class="unsorted-controls">
+        <input
+          class="unsorted-search"
+          type="text"
+          placeholder="Search…"
+          bind:value={unsortedSearch}
+          on:pointerdown|stopPropagation
+        />
+        <div class="sort-bar compact">
+          <button class="sort-btn" class:active={unsortedSortMode === 'default'}    on:click={() => unsortedSortMode = 'default'}    title="Default order">—</button>
+          <button class="sort-btn" class:active={unsortedSortMode === 'alpha-asc'}  on:click={() => unsortedSortMode = 'alpha-asc'}  title="A → Z">A→Z</button>
+          <button class="sort-btn" class:active={unsortedSortMode === 'alpha-desc'} on:click={() => unsortedSortMode = 'alpha-desc'} title="Z → A">Z→A</button>
+          <button class="sort-btn" class:active={unsortedSortMode === 'by-type'}    on:click={() => unsortedSortMode = 'by-type'}    title="Group by type">Type</button>
         </div>
       </div>
 
@@ -790,6 +809,7 @@
 
         {/if}
       </div>
+      {/if}<!-- end {#if !unsortedCollapsed} -->
 
       <!-- Reclustering frosted-glass overlay -->
       {#if reclustering}
@@ -1202,9 +1222,19 @@
     border-bottom: 0.5px solid var(--border);
     padding: 8px 10px;
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 6px;
+    width: 100%;
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    transition: background 100ms;
   }
+  .unsorted-header:hover { background: var(--bg-secondary); }
 
   .unsorted-title {
     font-size: 11px;
@@ -1212,10 +1242,22 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-secondary);
-    padding: 0 4px;
+    flex: 1;
+    user-select: none;
+  }
+
+  .drop-hint {
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .unsorted-controls {
+    flex-shrink: 0;
+    border-bottom: 0.5px solid var(--border);
+    padding: 6px 10px;
     display: flex;
     align-items: center;
     gap: 6px;
