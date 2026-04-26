@@ -4,7 +4,8 @@ from ..core.constants import SKIP_EMBEDDING_TYPES, MIN_TOKENS_TO_EMBED
 from .identity_utils import build_identity_text
 
 _MAX_CHARS = 2000  # ~256 tokens for all-MiniLM-L6-v2; avoids tokenizing huge strings
-_PHOTO_PREFIX = "__PHOTO__"
+_PHOTO_PREFIX      = "__PHOTO__"
+_SCREENSHOT_PREFIX = "__SCREENSHOT__"
 
 try:
     from ..daemon.model_server import MODEL_SERVER_URL
@@ -54,6 +55,15 @@ class EmbeddingAgent:
             return EmbeddedFile(file_meta=file.file_meta, embedding=None, raw_text="", status="skipped")
 
         raw = file.raw_text.strip()
+
+        # Screenshots detected by filename — route to Screenshots cluster, not Photos
+        if raw.startswith(_SCREENSHOT_PREFIX):
+            return EmbeddedFile(
+                file_meta=file.file_meta,
+                embedding=None,
+                raw_text="screenshot",
+                status="screenshot",
+            )
 
         # Camera photos carry a date bucket, not semantic text — route to photo clusters
         if raw.startswith(_PHOTO_PREFIX):

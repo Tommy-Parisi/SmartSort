@@ -61,10 +61,9 @@ def _stratified_sample(file_metas, max_files: int, seed: int = 42):
 
 
 def _build_photo_clusters(photo_embedded: list, next_cluster_id: int) -> tuple:
-    """Group photo EmbeddedFiles by date bucket into synthetic clusters.
+    """Group photo EmbeddedFiles by year into synthetic clusters.
 
     Returns (cluster_map_additions, folder_names_additions).
-    Buckets with only 1 file are skipped (routed to unsorted by the caller).
     """
     buckets: dict = defaultdict(list)
     for pf in photo_embedded:
@@ -75,21 +74,7 @@ def _build_photo_clusters(photo_embedded: list, next_cluster_id: int) -> tuple:
     cid = next_cluster_id
 
     for date_bucket, pfiles in sorted(buckets.items()):
-        if len(pfiles) < 2:
-            continue
-
-        parts = date_bucket.split("_")
-        if date_bucket == "unknown":
-            folder_name = "Photos"
-        elif len(parts) == 2:
-            year, month = parts
-            try:
-                month_name = datetime(int(year), int(month), 1).strftime("%B")
-                folder_name = f"Photos {month_name} {year}"
-            except Exception:
-                folder_name = f"Photos {date_bucket.replace('_', ' ')}"
-        else:
-            folder_name = f"Photos {date_bucket}"
+        folder_name = "Photos" if date_bucket == "unknown" else f"Photos {date_bucket}"
 
         cluster_files = [
             ClusteredFile(
@@ -106,6 +91,23 @@ def _build_photo_clusters(photo_embedded: list, next_cluster_id: int) -> tuple:
         cid += 1
 
     return new_clusters, new_names
+
+
+def _build_screenshot_cluster(screenshot_embedded: list, next_cluster_id: int) -> tuple:
+    """Group all screenshots into a single Screenshots folder."""
+    if not screenshot_embedded:
+        return {}, {}
+    cluster_files = [
+        ClusteredFile(
+            file_meta=pf.file_meta,
+            embedding=None,
+            raw_text="screenshot",
+            cluster_id=next_cluster_id,
+            status="clustered",
+        )
+        for pf in screenshot_embedded
+    ]
+    return {next_cluster_id: cluster_files}, {next_cluster_id: "Screenshots"}
 
 
 class TauriPipeline:
@@ -253,9 +255,10 @@ class TauriPipeline:
                 self.log_progress(3, f"Embedding: {extracted_file.file_meta.file_name}", int(progress))
             
             embedded_count = len([e for e in embedded if e.status == "embedded"])
-            photo_embedded = [e for e in embedded if e.status == "photo"]
+            photo_embedded      = [e for e in embedded if e.status == "photo"]
+            screenshot_embedded = [e for e in embedded if e.status == "screenshot"]
 
-            if embedded_count < 2 and not photo_embedded:
+            if embedded_count < 2 and not photo_embedded and not screenshot_embedded:
                 self.results.update({
                     "status": "error",
                     "message": "Not enough files could be embedded for clustering.",
@@ -296,12 +299,20 @@ class TauriPipeline:
                 cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
                 folder_names = naming_agent.name_clusters(cluster_map)
 
-            # Inject photo synthetic clusters after merge
+            # Inject photo and screenshot synthetic clusters after merge
+            next_id = max(cluster_map.keys(), default=-1) + 1
+            photo_clusters = {}
             if photo_embedded:
-                next_id = max(cluster_map.keys(), default=-1) + 1
                 photo_clusters, photo_names = _build_photo_clusters(photo_embedded, next_id)
                 cluster_map.update(photo_clusters)
                 folder_names.update(photo_names)
+                next_id = max(cluster_map.keys(), default=-1) + 1
+
+            screenshot_clusters = {}
+            if screenshot_embedded:
+                screenshot_clusters, screenshot_names = _build_screenshot_cluster(screenshot_embedded, next_id)
+                cluster_map.update(screenshot_clusters)
+                folder_names.update(screenshot_names)
             
             # Prepare folder structure for output
             folders_info = []
@@ -448,10 +459,11 @@ class TauriPipeline:
                 embedded_file = embedder.embed(extracted_file)
                 embedded.append(embedded_file)
 
-            embedded_count = len([e for e in embedded if e.status == "embedded"])
-            photo_embedded = [e for e in embedded if e.status == "photo"]
+            embedded_count      = len([e for e in embedded if e.status == "embedded"])
+            photo_embedded      = [e for e in embedded if e.status == "photo"]
+            screenshot_embedded = [e for e in embedded if e.status == "screenshot"]
 
-            if embedded_count < 2 and not photo_embedded:
+            if embedded_count < 2 and not photo_embedded and not screenshot_embedded:
                 self._emit("sort-error", {"message": "Not enough files could be embedded for clustering."})
                 return
 
@@ -487,11 +499,19 @@ class TauriPipeline:
                 cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
                 folder_names = naming_agent.name_clusters(cluster_map)
 
+            next_id = max(cluster_map.keys(), default=-1) + 1
+            photo_clusters = {}
             if photo_embedded:
-                next_id = max(cluster_map.keys(), default=-1) + 1
                 photo_clusters, photo_names = _build_photo_clusters(photo_embedded, next_id)
                 cluster_map.update(photo_clusters)
                 folder_names.update(photo_names)
+                next_id = max(cluster_map.keys(), default=-1) + 1
+
+            screenshot_clusters = {}
+            if screenshot_embedded:
+                screenshot_clusters, screenshot_names = _build_screenshot_cluster(screenshot_embedded, next_id)
+                cluster_map.update(screenshot_clusters)
+                folder_names.update(screenshot_names)
 
             # Emit folder-discovered
             for cluster_id, files in sorted(cluster_map.items()):
@@ -504,7 +524,11 @@ class TauriPipeline:
                 })
 
             # Process all files in naming stage to reach 90%
-            all_files = list(clustered) + [f for files in (photo_clusters.values() if photo_embedded else []) for f in files]
+            all_files = (
+                list(clustered)
+                + [f for files in photo_clusters.values() for f in files]
+                + [f for files in screenshot_clusters.values() for f in files]
+            )
             for f in all_files:
                 current_processed += W_NAM
                 folder_name = folder_names.get(f.cluster_id, "Unsorted") if f.cluster_id != -1 else "Unsorted"
@@ -553,8 +577,9 @@ class TauriPipeline:
                 self._persist_index(cluster_map, folder_names)
 
             unsorted_count = sum(1 for f in clustered if f.cluster_id == -1)
-            photo_sorted = sum(len(files) for files in (photo_clusters.values() if photo_embedded else []))
-            sorted_count = len(clustered) - unsorted_count + photo_sorted
+            photo_sorted      = sum(len(files) for files in photo_clusters.values())
+            screenshot_sorted = sum(len(files) for files in screenshot_clusters.values())
+            sorted_count = len(clustered) - unsorted_count + photo_sorted + screenshot_sorted
 
             self._emit("sort-complete", {
                 "folders_created": len(folder_tree_entries),

@@ -12,9 +12,12 @@ _PHOTO_FALLBACK_MIN_TOKENS = 5
 
 CREATIVE_SOFTWARE = {
     'figma', 'sketch', 'adobe', 'illustrator', 'photoshop', 'canva',
-    'screenshot', 'snagit', 'snip', 'grab', 'greenshot', 'lightshot',
-    'chrome', 'safari', 'firefox', 'preview', 'keynote', 'powerpoint',
+    'snagit', 'snip', 'grab', 'greenshot', 'lightshot',
+    'keynote', 'powerpoint',
 }
+
+# Matches Mac "Screenshot YYYY-MM-DD..." and "Screen Shot YYYY-MM-DD..." naming
+_SCREENSHOT_RE = re.compile(r'^screen.?shot[\s_(]', re.IGNORECASE)
 
 
 def _is_creative_export(exif_parts: list[str]) -> bool:
@@ -37,13 +40,9 @@ def _get_exif_date_bucket(exif_parts: list[str]) -> str | None:
     if not raw:
         return None
     try:
-        # EXIF format: "YYYY:MM:DD HH:MM:SS"
+        # EXIF format: "YYYY:MM:DD HH:MM:SS" — always bucket by year to avoid a folder per month
         dt = datetime.strptime(raw[:10], "%Y:%m:%d")
-        now = datetime.now()
-        if (now - dt).days < 730:
-            return dt.strftime("%Y_%m")
-        else:
-            return dt.strftime("%Y")
+        return dt.strftime("%Y")
     except Exception:
         return None
 
@@ -132,7 +131,7 @@ class OCRExtractorAgent:
         except Exception:
             exif_parts = []
 
-        # OCR first — readable images embed normally regardless of EXIF
+        # OCR first — readable images (including screenshots with text) embed as documents
         ocr_text = _ocr_text(p)
         if _ocr_token_count(ocr_text) >= _OCR_TOKEN_THRESHOLD:
             stem = clean_filename_stem(file_path)
@@ -140,14 +139,19 @@ class OCRExtractorAgent:
                 return token_cap(f"scanned document {stem} {ocr_text}")
             return token_cap(f"scanned document {ocr_text}")
 
+        # Filename-based screenshot detection — Mac/Windows screenshots have no EXIF but
+        # a predictable name pattern. Route before EXIF tiers so they never land in Photos.
+        if _SCREENSHOT_RE.match(p.name):
+            return "__SCREENSHOT__"
+
         # Tier 1: Creative software export → embed, cluster with related docs
         if _is_creative_export(exif_parts):
             return _creative_identity(p, exif_parts)
 
-        # Tier 2: Camera photo with EXIF datetime → photo bucket
+        # Tier 2: Camera photo with EXIF datetime → photo bucket (year-only)
         date_bucket = _get_exif_date_bucket(exif_parts)
         if date_bucket:
             return f"__PHOTO__{date_bucket}"
 
-        # Tier 3: No usable EXIF
+        # Tier 3: No usable signal — generic photo bucket
         return "__PHOTO__unknown"
