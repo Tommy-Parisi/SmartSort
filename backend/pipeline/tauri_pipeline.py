@@ -28,9 +28,10 @@ from backend.agents.embedding_agent import EmbeddingAgent
 from backend.agents.clustering_agent import ClusteringAgent
 from backend.agents.folder_naming_agent import FolderNamingAgent
 from backend.agents.file_relocation_agent import FileRelocationAgent
-from backend.core.models import FileContent
+from backend.core.models import FileContent, ClusteredFile
 from backend.core.license import check_file_limit, activate, license_status
 from dotenv import load_dotenv
+from datetime import datetime
 import random
 
 load_dotenv()
@@ -57,6 +58,54 @@ def _stratified_sample(file_metas, max_files: int, seed: int = 42):
         result.extend(rng.sample(files, n))
         remaining -= n
     return result
+
+
+def _build_photo_clusters(photo_embedded: list, next_cluster_id: int) -> tuple:
+    """Group photo EmbeddedFiles by date bucket into synthetic clusters.
+
+    Returns (cluster_map_additions, folder_names_additions).
+    Buckets with only 1 file are skipped (routed to unsorted by the caller).
+    """
+    buckets: dict = defaultdict(list)
+    for pf in photo_embedded:
+        buckets[pf.raw_text].append(pf)
+
+    new_clusters: dict = {}
+    new_names: dict = {}
+    cid = next_cluster_id
+
+    for date_bucket, pfiles in sorted(buckets.items()):
+        if len(pfiles) < 2:
+            continue
+
+        parts = date_bucket.split("_")
+        if date_bucket == "unknown":
+            folder_name = "Photos"
+        elif len(parts) == 2:
+            year, month = parts
+            try:
+                month_name = datetime(int(year), int(month), 1).strftime("%B")
+                folder_name = f"Photos {month_name} {year}"
+            except Exception:
+                folder_name = f"Photos {date_bucket.replace('_', ' ')}"
+        else:
+            folder_name = f"Photos {date_bucket}"
+
+        cluster_files = [
+            ClusteredFile(
+                file_meta=pf.file_meta,
+                embedding=None,
+                raw_text=date_bucket,
+                cluster_id=cid,
+                status="clustered",
+            )
+            for pf in pfiles
+        ]
+        new_clusters[cid] = cluster_files
+        new_names[cid] = folder_name
+        cid += 1
+
+    return new_clusters, new_names
 
 
 class TauriPipeline:
@@ -204,43 +253,55 @@ class TauriPipeline:
                 self.log_progress(3, f"Embedding: {extracted_file.file_meta.file_name}", int(progress))
             
             embedded_count = len([e for e in embedded if e.status == "embedded"])
-            
-            if embedded_count < 2:
+            photo_embedded = [e for e in embedded if e.status == "photo"]
+
+            if embedded_count < 2 and not photo_embedded:
                 self.results.update({
                     "status": "error",
                     "message": "Not enough files could be embedded for clustering.",
                     "errors": ["Need at least 2 valid embeddings for clustering"]
                 })
                 return self.results
-            
+
             # 4. Clustering
             self.log_progress(4, "Clustering files by semantic similarity...", 60)
             clusterer = ClusteringAgent(fallback_k_range=(2, 10), min_cluster_size=2)
-            clustered = clusterer.cluster(embedded)
-            
-            if not clustered:
-                self.results.update({
-                    "status": "error",
-                    "message": "Clustering failed.",
-                    "errors": ["Could not create semantic clusters from the files"]
-                })
-                return self.results
-            
+            if embedded_count >= 2:
+                clustered = clusterer.cluster(embedded)
+                if not clustered:
+                    self.results.update({
+                        "status": "error",
+                        "message": "Clustering failed.",
+                        "errors": ["Could not create semantic clusters from the files"]
+                    })
+                    return self.results
+            else:
+                clustered = []
+
             cluster_map = defaultdict(list)
             for f in clustered:
                 cluster_map[f.cluster_id].append(f)
-            
+
             self.results["clusters_found"] = len(cluster_map)
-            
+
             # 5. Folder Naming
             self.log_progress(5, "Generating intelligent folder names...", 80)
             naming_agent = FolderNamingAgent()
-            folder_names = naming_agent.name_clusters(cluster_map)
-            
-            # 5.1 Merge Similar Clusters
-            self.log_progress(5, "Optimizing cluster organization...", 85)
-            cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
-            folder_names = naming_agent.name_clusters(cluster_map)
+            folder_names: dict = {}
+            if cluster_map:
+                folder_names = naming_agent.name_clusters(cluster_map)
+
+                # 5.1 Merge Similar Clusters
+                self.log_progress(5, "Optimizing cluster organization...", 85)
+                cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
+                folder_names = naming_agent.name_clusters(cluster_map)
+
+            # Inject photo synthetic clusters after merge
+            if photo_embedded:
+                next_id = max(cluster_map.keys(), default=-1) + 1
+                photo_clusters, photo_names = _build_photo_clusters(photo_embedded, next_id)
+                cluster_map.update(photo_clusters)
+                folder_names.update(photo_names)
             
             # Prepare folder structure for output
             folders_info = []
@@ -343,72 +404,98 @@ class TauriPipeline:
                 })
                 return
 
-            files_total = len(ingestor.file_meta_queue)
+            num_files = len(ingestor.file_meta_queue)
+            
+            # extraction+embedding take 75% of bar, naming+placing take 25%
+            W_EXT, W_EMB, W_NAM, W_PLC = 35, 40, 15, 10
+            files_total = num_files * (W_EXT + W_EMB + W_NAM + W_PLC)
+            current_processed = 0
 
-            # 2. Extraction — emit per-file progress
+            # 2. Extraction — 40% of bar
             router = ExtractorRouter()
             extracted = []
             for i, fmeta in enumerate(ingestor.file_meta_queue):
-                content: FileContent = router.route(fmeta)
-                extracted.append(content)
+                current_processed += W_EXT
                 self._emit("file-assigned", {
                     "filename": fmeta.file_name,
                     "cluster_id": -1,
                     "folder_name": "",
-                    "files_processed": i + 1,
+                    "files_processed": current_processed,
                     "files_total": files_total,
                     "stage": "extracting",
                 })
+                content: FileContent = router.route(fmeta)
+                extracted.append(content)
 
             success_count = sum(1 for f in extracted if f.status == "success")
-            fail_count = len(extracted) - success_count
-
             if success_count == 0:
                 self._emit("sort-error", {"message": "No files could be extracted."})
                 return
 
-            # 3. Embedding — emit per-file progress
+            # 3. Embedding — 40% of bar (Total so far: 80%)
             embedder = EmbeddingAgent()
             embedded = []
             for i, extracted_file in enumerate(extracted):
-                embedded_file = embedder.embed(extracted_file)
-                embedded.append(embedded_file)
+                current_processed += W_EMB
                 self._emit("file-assigned", {
                     "filename": extracted_file.file_meta.file_name,
                     "cluster_id": -1,
                     "folder_name": "",
-                    "files_processed": i + 1,
+                    "files_processed": current_processed,
                     "files_total": files_total,
                     "stage": "embedding",
                 })
+                embedded_file = embedder.embed(extracted_file)
+                embedded.append(embedded_file)
 
             embedded_count = len([e for e in embedded if e.status == "embedded"])
-            if embedded_count < 2:
+            photo_embedded = [e for e in embedded if e.status == "photo"]
+
+            if embedded_count < 2 and not photo_embedded:
                 self._emit("sort-error", {"message": "Not enough files could be embedded for clustering."})
                 return
 
-            # 4. Clustering (batch — no per-file events, just the result)
-            clusterer = ClusteringAgent(fallback_k_range=(2, 10), min_cluster_size=2)
-            clustered = clusterer.cluster(embedded)
+            # Signal the start of the 'Thinking' phase
+            self._emit("file-assigned", {
+                "filename": "Semantic Clustering",
+                "cluster_id": -1,
+                "folder_name": "",
+                "files_processed": current_processed,
+                "files_total": files_total,
+                "stage": "clustering",
+            })
 
-            if not clustered:
-                self._emit("sort-error", {"message": "Clustering failed."})
-                return
+            # 4. Clustering (batch)
+            clusterer = ClusteringAgent(fallback_k_range=(2, 10), min_cluster_size=2)
+            if embedded_count >= 2:
+                clustered = clusterer.cluster(embedded)
+                if not clustered:
+                    self._emit("sort-error", {"message": "Clustering failed."})
+                    return
+            else:
+                clustered = []
 
             cluster_map = defaultdict(list)
             for f in clustered:
                 cluster_map[f.cluster_id].append(f)
 
-            # 5. Folder Naming
+            # 5. Folder Naming — 10% of bar (Total so far: 90%)
             naming_agent = FolderNamingAgent()
-            folder_names = naming_agent.name_clusters(cluster_map)
-            cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
-            folder_names = naming_agent.name_clusters(cluster_map)
+            folder_names: dict = {}
+            if cluster_map:
+                folder_names = naming_agent.name_clusters(cluster_map)
+                cluster_map = clusterer.merge_similar_clusters(cluster_map, folder_names)
+                folder_names = naming_agent.name_clusters(cluster_map)
 
-            # Emit folder-discovered for each cluster
+            if photo_embedded:
+                next_id = max(cluster_map.keys(), default=-1) + 1
+                photo_clusters, photo_names = _build_photo_clusters(photo_embedded, next_id)
+                cluster_map.update(photo_clusters)
+                folder_names.update(photo_names)
+
+            # Emit folder-discovered
             for cluster_id, files in sorted(cluster_map.items()):
-                if cluster_id == -1:
-                    continue
+                if cluster_id == -1: continue
                 folder_name = folder_names.get(cluster_id, f"cluster_{cluster_id}")
                 self._emit("folder-discovered", {
                     "cluster_id": cluster_id,
@@ -416,28 +503,24 @@ class TauriPipeline:
                     "estimated_capacity": len(files),
                 })
 
-            # Emit file-assigned (naming stage) for each assigned file
-            for i, f in enumerate(clustered):
-                if f.cluster_id == -1:
-                    continue
-                folder_name = folder_names.get(f.cluster_id, f"cluster_{f.cluster_id}")
+            # Process all files in naming stage to reach 90%
+            all_files = list(clustered) + [f for files in (photo_clusters.values() if photo_embedded else []) for f in files]
+            for f in all_files:
+                current_processed += W_NAM
+                folder_name = folder_names.get(f.cluster_id, "Unsorted") if f.cluster_id != -1 else "Unsorted"
                 self._emit("file-assigned", {
                     "filename": f.file_meta.file_name,
                     "cluster_id": f.cluster_id,
                     "folder_name": folder_name,
-                    "files_processed": i + 1,
+                    "files_processed": current_processed,
                     "files_total": files_total,
                     "stage": "naming",
                 })
 
-            # Build folder tree for the complete event
-            unsorted_count = sum(1 for f in clustered if f.cluster_id == -1)
-            sorted_count = len(clustered) - unsorted_count
-
+            # Build folder tree for final event
             folder_tree_entries = []
             for cluster_id, files in sorted(cluster_map.items()):
-                if cluster_id == -1:
-                    continue
+                if cluster_id == -1: continue
                 folder_name = folder_names.get(cluster_id, f"cluster_{cluster_id}")
                 file_entries = []
                 for f in files:
@@ -449,38 +532,29 @@ class TauriPipeline:
                     "files": file_entries,
                 })
 
-            # 6. File Relocation — emit per-file placing events
+            # 6. File Relocation — Final 10% of bar
             if not dry_run:
-                relocation_agent = FileRelocationAgent(
-                    base_destination_dir=str(self.input_folder),
-                    dry_run=False
-                )
-                relocation_results = relocation_agent.relocate_files(cluster_map)
+                relocation_agent = FileRelocationAgent(base_destination_dir=str(self.input_folder), dry_run=False)
+                relocation_agent.relocate_files(cluster_map)
 
-                for i, entry in enumerate(folder_tree_entries):
-                    for j, file_entry in enumerate(entry["files"]):
-                        self._emit("file-assigned", {
-                            "filename": file_entry["name"],
-                            "cluster_id": entry["cluster_id"],
-                            "folder_name": entry["folder_name"],
-                            "files_processed": j + 1,
-                            "files_total": len(entry["files"]),
-                            "stage": "placing",
-                        })
+            for f in all_files:
+                current_processed += W_PLC
+                folder_name = folder_names.get(f.cluster_id, "Unsorted") if f.cluster_id != -1 else "Unsorted"
+                self._emit("file-assigned", {
+                    "filename": f.file_meta.file_name,
+                    "cluster_id": f.cluster_id,
+                    "folder_name": folder_name,
+                    "files_processed": current_processed,
+                    "files_total": files_total,
+                    "stage": "placing",
+                })
 
+            if not dry_run:
                 self._persist_index(cluster_map, folder_names)
-            else:
-                # Dry run: emit placing events without actually moving
-                for entry in folder_tree_entries:
-                    for j, file_entry in enumerate(entry["files"]):
-                        self._emit("file-assigned", {
-                            "filename": file_entry["name"],
-                            "cluster_id": entry["cluster_id"],
-                            "folder_name": entry["folder_name"],
-                            "files_processed": j + 1,
-                            "files_total": len(entry["files"]),
-                            "stage": "placing",
-                        })
+
+            unsorted_count = sum(1 for f in clustered if f.cluster_id == -1)
+            photo_sorted = sum(len(files) for files in (photo_clusters.values() if photo_embedded else []))
+            sorted_count = len(clustered) - unsorted_count + photo_sorted
 
             self._emit("sort-complete", {
                 "folders_created": len(folder_tree_entries),
@@ -523,7 +597,7 @@ class TauriPipeline:
                     cluster_folders,
                 )
         except Exception as exc:
-            self.results["errors"].append(f"Index persistence failed: {exc}")
+            pass
 
 
 def apply_preview(base_folder: str, preview_folders: list,
@@ -561,7 +635,7 @@ def apply_preview(base_folder: str, preview_folders: list,
                 continue
             src = base / filename
             if not src.exists():
-                errors.append(f"File not found: {src}")
+                errors.append(f"File found in preview but not on disk: {src}")
                 continue
 
             dest = dest_dir / filename

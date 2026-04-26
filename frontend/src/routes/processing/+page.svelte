@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto, beforeNavigate } from '$app/navigation';
   import Logo from '$lib/components/Logo.svelte';
-  import ParticleCanvas from '$lib/components/ParticleCanvas.svelte';
+  import MailroomCanvas from '$lib/components/MailroomCanvas.svelte';
   import { sortStore } from '$lib/stores/sort';
   import {
     onFileAssigned,
@@ -29,12 +29,15 @@
     placing:    'Placing files…',
   };
 
-  let currentStage = 'extracting';
-  let foldersFound = 0;
-  let filesPlaced  = 0;
-  let estETA       = '–';
+  let currentStage   = 'extracting';
+  let foldersFound   = 0;
+  let extractedCount = 0;
+  let placedCount    = 0;
+  let actualTotal    = 0;
+  let estETA         = '–';
 
   let sortRunning = false;
+  let maxProgressPct = 0;
 
   // Error states
   let errorMessage   = '';
@@ -51,17 +54,17 @@
     }
   });
 
-  // Rolling 10-second rate buffer for ETA
-  const rateBuffer: number[] = [];
+  let sortStartTs = 0;
 
   $: progressPct = store.filesTotal > 0
     ? Math.round((store.filesProcessed / store.filesTotal) * 100)
     : 0;
 
-  $: {
-    foldersFound = store.foldersDiscovered.length;
-    filesPlaced  = store.filesProcessed;
+  $: if (progressPct > maxProgressPct) {
+    maxProgressPct = progressPct;
   }
+
+  $: foldersFound = store.foldersDiscovered.length;
 
   $: phase = foldersFound > 0 ? 'sorting' : 'processing';
 
@@ -90,22 +93,28 @@
       currentStage = e.stage;
       sortStore.update(s => ({
         ...s,
-        filesProcessed: e.files_processed,
-        filesTotal:     e.files_total,
+        filesProcessed: Math.max(s.filesProcessed, e.files_processed),
+        filesTotal:     Math.max(s.filesTotal, e.files_total),
       }));
 
-      // Rolling ETA: 10-second sliding window
       const now = Date.now();
-      rateBuffer.push(now);
-      const cutoff = now - 10_000;
-      while (rateBuffer.length && rateBuffer[0] < cutoff) rateBuffer.shift();
-      const rate      = rateBuffer.length / 10;
-      const remaining = e.files_total - e.files_processed;
-      if (rate > 0) {
-        const secs = remaining / rate;
-        estETA = secs < 60
-          ? `~${Math.ceil(secs)}s`
-          : `~${Math.ceil(secs / 60)}m`;
+      if (!sortStartTs) sortStartTs = now;
+      // weights per file sum to 100, so actual file count = files_total / 100
+      if (!actualTotal && e.files_total > 0) actualTotal = Math.round(e.files_total / 100);
+      if (e.stage === 'extracting') extractedCount++;
+      if (e.stage === 'placing')    placedCount++;
+      if (e.stage === 'extracting' || e.stage === 'embedding') {
+        const frac = e.files_processed / e.files_total;
+        if (frac > 0.04) {
+          const elapsedMs = now - sortStartTs;
+          const remainingMs = (elapsedMs / frac) - elapsedMs;
+          const secs = remainingMs / 1000;
+          estETA = secs < 10  ? '<10s'
+            : secs < 60       ? `~${Math.round(secs / 5) * 5}s`
+            : `~${Math.ceil(secs / 60)}m`;
+        }
+      } else if (e.stage === 'placing') {
+        estETA = 'finishing…';
       } else {
         estETA = '–';
       }
@@ -113,6 +122,7 @@
 
     unlisteners.push(await onSortComplete((e: SortCompleteEvent) => {
       sortRunning = false;
+      maxProgressPct = 100;
       sortStore.update(s => ({
         ...s,
         folderTree:     e.folder_tree,
@@ -121,7 +131,6 @@
         filesUnsorted:  e.files_unsorted,
         stage:          s.previewMode ? 'preview' : 'done',
       }));
-      setTimeout(() => goto(store.previewMode ? '/preview' : '/done'), 600);
     }));
 
     unlisteners.push(await onSortError((e: SortErrorEvent) => {
@@ -182,20 +191,25 @@
     {:else}
       <!-- Normal processing UI -->
       <p class="phase-label">{phase === 'processing' ? 'Processing your files' : 'Sorting your files'}</p>
-      <ParticleCanvas {folderName} {phase} />
+      <MailroomCanvas on:complete={() => goto(store.previewMode ? '/preview' : '/done')} />
 
       <div class="progress-track">
-        <div class="progress-fill" style="width: {progressPct}%"></div>
+        <div class="progress-fill" style="width: {maxProgressPct}%"></div>
       </div>
 
       <p class="stage-label">{STAGE_LABELS[currentStage] ?? 'Processing…'}</p>
 
       <div class="counters">
-        <span>{foldersFound} folders found</span>
+        {#if foldersFound > 0}
+          <span>{foldersFound} folders found</span>
+          <span class="dot">·</span>
+        {/if}
+        <span>
+          {currentStage === 'placing' ? placedCount : extractedCount} of {actualTotal}
+          {currentStage === 'placing' ? 'files sorted' : 'files processed'}
+        </span>
         <span class="dot">·</span>
-        <span>{filesPlaced} {phase === 'processing' ? 'files processed' : 'files sorted'}</span>
-        <span class="dot">·</span>
-        <span>{estETA} remaining</span>
+        <span>{estETA}</span>
       </div>
 
       <button class="btn-ghost" on:click={cancel}>Cancel</button>

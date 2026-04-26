@@ -50,9 +50,15 @@ a {
   text-decoration: none;
 }
 
-/* Allow text selection on content elements */
-p, span, h1, h2, h3, h4, li, .error-text, .selectable {
+/* Allow text selection on content elements (not span — too many UI uses) */
+p, h1, h2, h3, h4, li, .error-text, .selectable {
   user-select: text;
+}
+
+/* Kill all selection during pointer drags so moving the cursor over other rows
+   doesn't highlight their text */
+body.dragging, body.dragging * {
+  user-select: none !important;
 }
 
 /* Scrollbar */
