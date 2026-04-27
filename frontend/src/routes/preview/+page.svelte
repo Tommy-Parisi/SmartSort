@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount, tick } from 'svelte';
+  import SortFlowLayout from '$lib/components/SortFlowLayout.svelte';
   import { sortStore } from '$lib/stores/sort';
   import type { PreviewFolder, PreviewFile } from '$lib/stores/sort';
   import { tauriConfirmSort, tauriReassignFiles, tauriGetFilePreview } from '$lib/tauri';
@@ -680,189 +681,204 @@
   }
 </script>
 
-<div class="page">
+<SortFlowLayout step={3}>
   <div class="main">
 
     <!-- ── Left panel: unsorted ───────────────────────────────────────────── -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="left-panel"
+      class:is-collapsed={unsortedCollapsed}
       data-unsorted-drop="true"
       class:drag-over={dragOverUnsorted}
     >
-      <!-- Header — always visible, click to collapse/expand -->
-      <button
-        class="unsorted-header"
-        type="button"
-        on:click={() => (unsortedCollapsed = !unsortedCollapsed)}
-        on:pointerdown|stopPropagation
-      >
-        <span class="unsorted-title">unsorted · {unsortedFiles.length} files</span>
-        {#if dragOverUnsorted && unsortedCollapsed}
-          <span class="drop-hint">drop here</span>
-        {/if}
-        <span class="chevron" class:open={!unsortedCollapsed}>^</span>
-      </button>
 
-      {#if !unsortedCollapsed}
-      <!-- Controls -->
-      <div class="unsorted-controls">
-        <input
-          class="unsorted-search"
-          type="text"
-          placeholder="Search…"
-          bind:value={unsortedSearch}
-          on:pointerdown|stopPropagation
-        />
-        <div class="sort-bar compact">
-          <button class="sort-btn" class:active={unsortedSortMode === 'default'}    on:click={() => unsortedSortMode = 'default'}    title="Default order">—</button>
-          <button class="sort-btn" class:active={unsortedSortMode === 'alpha-asc'}  on:click={() => unsortedSortMode = 'alpha-asc'}  title="A → Z">A→Z</button>
-          <button class="sort-btn" class:active={unsortedSortMode === 'alpha-desc'} on:click={() => unsortedSortMode = 'alpha-desc'} title="Z → A">Z→A</button>
-          <button class="sort-btn" class:active={unsortedSortMode === 'by-type'}    on:click={() => unsortedSortMode = 'by-type'}    title="Group by type">Type</button>
-        </div>
-      </div>
-
-      <div class="panel-scroll">
-        {#if unsortedFiles.length === 0}
-          <p class="empty-state">{dragOverUnsorted ? 'Drop to unsort' : 'All files sorted'}</p>
-        {:else if searchedUnsorted.length === 0}
-          <p class="empty-state">No matches</p>
-        {:else}
-
-          <!-- Pinned files -->
-          {#if pinnedUnsorted.length > 0}
-            <p class="section-label">Pinned</p>
-            {#each pinnedUnsorted as file (file.filename)}
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div
-                class="file-row pinned-row"
-                class:pointer-dragging={draggedFile?.filename === file.filename}
-                on:pointerdown={e => onFilePointerDown(e, file)}
-              >
-                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-                <span class="file-name">{trunc(file.filename, 19)}</span>
-                <button class="pin-btn pinned" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Unpin"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
-                {#if openUnsortedMoveFile === file.filename}
-                  <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
-                    <option value="" disabled selected>Move to…</option>
-                    {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
-                  </select>
-                {:else}
-                  <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
-                {/if}
-              </div>
-            {/each}
-            <div class="section-divider"></div>
-          {/if}
-
-          <!-- By-type grouped view -->
-          {#if unsortedSortMode === 'by-type'}
-            {#each typeGroups as [ext, files] (ext)}
-              <button class="type-group-header" type="button" on:click={() => toggleTypeGroup(ext)}>
-                <span class="ext-badge sm" style={extStyle(ext)}>{ext || '?'}</span>
-                <span class="type-group-label">{files.length} {files.length === 1 ? 'file' : 'files'}</span>
-                <span class="chevron" class:open={!collapsedTypes.has(ext)}>^</span>
-              </button>
-              {#if !collapsedTypes.has(ext)}
-                {#each files as file (file.filename)}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
-                    <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-                    <span class="file-name">{trunc(file.filename, 19)}</span>
-                    <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
-                    {#if openUnsortedMoveFile === file.filename}
-                      <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
-                        <option value="" disabled selected>Move to…</option>
-                        {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
-                      </select>
-                    {:else}
-                      <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
-                    {/if}
-                  </div>
-                {/each}
-              {/if}
-            {/each}
-
-          <!-- Default / alpha sorted view -->
-          {:else}
-            {#each sortedUnpinned as file, i (file.filename)}
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
-                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-                <span class="file-name">{trunc(file.filename, 17)}</span>
-                {#if unsortedSortMode === 'default' && !unsortedSearch}
-                  <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedUp(file)}   disabled={i === 0}                         title="Move up">↑</button>
-                  <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedDown(file)} disabled={i === sortedUnpinned.length - 1} title="Move down">↓</button>
-                {/if}
-                <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
-                {#if openUnsortedMoveFile === file.filename}
-                  <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
-                    <option value="" disabled selected>Move to…</option>
-                    {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
-                  </select>
-                {:else}
-                  <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
-                {/if}
-              </div>
-            {/each}
-          {/if}
-
-        {/if}
-      </div>
-      {/if}<!-- end {#if !unsortedCollapsed} -->
-
-      <!-- Reclustering frosted-glass overlay -->
-      {#if reclustering}
-        <div class="recluster-overlay">
-          <div class="spinner"></div>
-          <span>Reclustering…</span>
-        </div>
-      {/if}
-
-      <!-- Trash zone -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        class="trash-zone"
-        data-trash-drop="true"
-        class:drag-over={dragOverTrash}
-      >
+      {#if unsortedCollapsed}
+        <!-- Collapsed: thin vertical strip, click to expand -->
         <button
-          class="trash-header"
+          class="collapsed-strip"
           type="button"
-          on:click={() => trashExpanded = !trashExpanded}
+          on:click={() => (unsortedCollapsed = false)}
+          on:pointerdown|stopPropagation
+          title="Expand unsorted panel"
         >
-          <span class="trash-icon">🗑</span>
-          <span>Trash · {trashedFiles.length} {trashedFiles.length === 1 ? 'file' : 'files'}</span>
-          <span class="trash-chevron" class:open={trashExpanded}>^</span>
+          {#if unsortedFiles.length > 0}
+            <span class="collapsed-badge">{unsortedFiles.length}</span>
+          {/if}
+          <span class="collapsed-label">unsorted</span>
         </button>
-        {#if trashExpanded && trashedFiles.length > 0}
-          <div class="trash-files">
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            {#each trashedFiles as file (file.filename)}
-              <div
-                class="file-row trash-file-row"
-                class:pointer-dragging={draggedFile?.filename === file.filename}
-                on:pointerdown={e => onFilePointerDown(e, file)}
-              >
-                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-                <span class="file-name">{trunc(file.filename, 20)}</span>
-                <button
-                  class="restore-btn"
-                  type="button"
-                  on:pointerdown|stopPropagation
-                  on:click={() => restoreFromTrash(file)}
-                  title="Restore to unsorted"
-                >↩</button>
-              </div>
-            {/each}
+
+      {:else}
+        <!-- Expanded: full panel -->
+        <div class="unsorted-header">
+          <span class="unsorted-title">unsorted · {unsortedFiles.length} files</span>
+          <button
+            class="collapse-btn"
+            type="button"
+            on:pointerdown|stopPropagation
+            on:click={() => (unsortedCollapsed = true)}
+            title="Collapse"
+          >‹</button>
+        </div>
+
+        <div class="unsorted-controls">
+          <input
+            class="unsorted-search"
+            type="text"
+            placeholder="Search…"
+            bind:value={unsortedSearch}
+            on:pointerdown|stopPropagation
+          />
+          <div class="sort-bar compact">
+            <button class="sort-btn" class:active={unsortedSortMode === 'default'}    on:click={() => unsortedSortMode = 'default'}    title="Default order">—</button>
+            <button class="sort-btn" class:active={unsortedSortMode === 'alpha-asc'}  on:click={() => unsortedSortMode = 'alpha-asc'}  title="A → Z">A→Z</button>
+            <button class="sort-btn" class:active={unsortedSortMode === 'alpha-desc'} on:click={() => unsortedSortMode = 'alpha-desc'} title="Z → A">Z→A</button>
+            <button class="sort-btn" class:active={unsortedSortMode === 'by-type'}    on:click={() => unsortedSortMode = 'by-type'}    title="Group by type">Type</button>
+          </div>
+        </div>
+
+        <div class="panel-scroll">
+          {#if unsortedFiles.length === 0}
+            <p class="empty-state">{dragOverUnsorted ? 'Drop to unsort' : 'All files sorted'}</p>
+          {:else if searchedUnsorted.length === 0}
+            <p class="empty-state">No matches</p>
+          {:else}
+
+            <!-- Pinned files -->
+            {#if pinnedUnsorted.length > 0}
+              <p class="section-label">Pinned</p>
+              {#each pinnedUnsorted as file (file.filename)}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="file-row pinned-row"
+                  class:pointer-dragging={draggedFile?.filename === file.filename}
+                  on:pointerdown={e => onFilePointerDown(e, file)}
+                >
+                  <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                  <span class="file-name">{trunc(file.filename, 19)}</span>
+                  <button class="pin-btn pinned" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Unpin"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
+                  {#if openUnsortedMoveFile === file.filename}
+                    <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
+                      <option value="" disabled selected>Move to…</option>
+                      {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
+                    </select>
+                  {:else}
+                    <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
+                  {/if}
+                </div>
+              {/each}
+              <div class="section-divider"></div>
+            {/if}
+
+            <!-- By-type grouped view -->
+            {#if unsortedSortMode === 'by-type'}
+              {#each typeGroups as [ext, files] (ext)}
+                <button class="type-group-header" type="button" on:click={() => toggleTypeGroup(ext)}>
+                  <span class="ext-badge sm" style={extStyle(ext)}>{ext || '?'}</span>
+                  <span class="type-group-label">{files.length} {files.length === 1 ? 'file' : 'files'}</span>
+                  <span class="chevron" class:open={!collapsedTypes.has(ext)}>^</span>
+                </button>
+                {#if !collapsedTypes.has(ext)}
+                  {#each files as file (file.filename)}
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
+                      <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                      <span class="file-name">{trunc(file.filename, 19)}</span>
+                      <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
+                      {#if openUnsortedMoveFile === file.filename}
+                        <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
+                          <option value="" disabled selected>Move to…</option>
+                          {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
+                        </select>
+                      {:else}
+                        <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
+                      {/if}
+                    </div>
+                  {/each}
+                {/if}
+              {/each}
+
+            <!-- Default / alpha sorted view -->
+            {:else}
+              {#each sortedUnpinned as file, i (file.filename)}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
+                  <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                  <span class="file-name">{trunc(file.filename, 17)}</span>
+                  {#if unsortedSortMode === 'default' && !unsortedSearch}
+                    <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedUp(file)}   disabled={i === 0}                         title="Move up">↑</button>
+                    <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedDown(file)} disabled={i === sortedUnpinned.length - 1} title="Move down">↓</button>
+                  {/if}
+                  <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
+                  {#if openUnsortedMoveFile === file.filename}
+                    <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
+                      <option value="" disabled selected>Move to…</option>
+                      {#each sortedPreviewFolders as dest}<option value={String(dest.cluster_id)}>{dest.name}</option>{/each}
+                    </select>
+                  {:else}
+                    <button class="move-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => (openUnsortedMoveFile = file.filename)} title="Move to folder">→</button>
+                  {/if}
+                </div>
+              {/each}
+            {/if}
+
+          {/if}
+        </div>
+
+        <!-- Reclustering frosted-glass overlay -->
+        {#if reclustering}
+          <div class="recluster-overlay">
+            <div class="spinner"></div>
+            <span>Reclustering…</span>
           </div>
         {/if}
-        {#if trashExpanded && trashedFiles.length === 0}
-          <p class="empty-state" style="padding:10px 14px;font-size:11px;">
-            {dragOverTrash ? 'Drop to delete on confirm' : 'No files in trash'}
-          </p>
-        {/if}
-      </div>
+
+        <!-- Trash zone -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="trash-zone"
+          data-trash-drop="true"
+          class:drag-over={dragOverTrash}
+        >
+          <button
+            class="trash-header"
+            type="button"
+            on:click={() => trashExpanded = !trashExpanded}
+          >
+            <span class="trash-icon">🗑</span>
+            <span>Trash · {trashedFiles.length} {trashedFiles.length === 1 ? 'file' : 'files'}</span>
+            <span class="trash-chevron" class:open={trashExpanded}>^</span>
+          </button>
+          {#if trashExpanded && trashedFiles.length > 0}
+            <div class="trash-files">
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              {#each trashedFiles as file (file.filename)}
+                <div
+                  class="file-row trash-file-row"
+                  class:pointer-dragging={draggedFile?.filename === file.filename}
+                  on:pointerdown={e => onFilePointerDown(e, file)}
+                >
+                  <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                  <span class="file-name">{trunc(file.filename, 20)}</span>
+                  <button
+                    class="restore-btn"
+                    type="button"
+                    on:pointerdown|stopPropagation
+                    on:click={() => restoreFromTrash(file)}
+                    title="Restore to unsorted"
+                  >↩</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#if trashExpanded && trashedFiles.length === 0}
+            <p class="empty-state" style="padding:10px 14px;font-size:11px;">
+              {dragOverTrash ? 'Drop to delete on confirm' : 'No files in trash'}
+            </p>
+          {/if}
+        </div>
+      {/if}<!-- end expanded -->
+
     </div>
 
     <!-- ── Right panel: folder cards ─────────────────────────────────────── -->
@@ -1023,18 +1039,23 @@
 
   </div>
 
-  <!-- ── Bottom bar ─────────────────────────────────────────────────────── -->
-  <div class="bottom-bar">
+  <svelte:fragment slot="footer-left">
     <button class="btn-ghost" on:click={() => goto('/')}>Back</button>
+  </svelte:fragment>
+
+  <svelte:fragment slot="footer-center">
     {#if error}
       <p class="error-text">{error}</p>
     {/if}
+  </svelte:fragment>
+
+  <svelte:fragment slot="footer-right">
     <button class="btn-primary" disabled={confirming} on:click={confirmSort}>
       {confirming ? 'Moving…' : 'Move files →'}
     </button>
-  </div>
+  </svelte:fragment>
 
-</div>
+</SortFlowLayout>
 
 {#if previewingFile}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -1096,14 +1117,6 @@
 {/if}
 
 <style>
-  .page {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    overflow: hidden;
-    background: var(--bg);
-  }
-
   .main {
     display: flex;
     flex: 1;
@@ -1126,9 +1139,70 @@
     border-right: 0.5px solid var(--border);
     background: var(--bg);
     overflow: hidden;
-    transition: background 100ms;
+    transition: width 180ms ease, background 100ms;
     position: relative;
   }
+
+  .left-panel.is-collapsed {
+    width: 28px;
+  }
+
+  /* ── Collapsed strip (the thin clickable tab) ── */
+  .collapsed-strip {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 12px 0;
+  }
+  .collapsed-strip:hover { background: var(--bg-secondary); }
+
+  .collapsed-label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+
+  .collapsed-badge {
+    background: var(--text);
+    color: var(--bg);
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  /* ── Collapse button (in expanded header) ── */
+  .collapse-btn {
+    background: none;
+    border: none;
+    font-size: 14px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+  .collapse-btn:hover { opacity: 1; color: var(--text); }
 
   /* Frosted-glass reclustering overlay */
   .recluster-overlay {
@@ -1860,18 +1934,6 @@
   .new-label {
     font-size: 12px;
     color: var(--text-secondary);
-  }
-
-  /* ── Bottom bar ── */
-  .bottom-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    border-top: 0.5px solid var(--border);
-    background: var(--bg);
-    flex-shrink: 0;
-    gap: 12px;
   }
 
   .error-text {

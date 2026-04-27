@@ -1,11 +1,11 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { open } from '@tauri-apps/plugin-dialog';
-  import Logo from '$lib/components/Logo.svelte';
+  import ShellLayout from '$lib/components/ShellLayout.svelte';
   import Toggle from '$lib/components/Toggle.svelte';
   import TrialBanner from '$lib/components/TrialBanner.svelte';
   import { sortStore, resetSort } from '$lib/stores/sort';
-  import { tauriGetLicenseStatus } from '$lib/tauri';
+  import { tauriGetLicenseStatus, tauriGetHistory, tauriActivateLicense, type SortSession } from '$lib/tauri';
   import { onMount } from 'svelte';
 
   let store = $sortStore;
@@ -16,18 +16,26 @@
   let licenseKey = '';
   let activateError = '';
   let activating = false;
+  let recentSessions: SortSession[] = [];
+  let historyLoading = true;
 
   onMount(async () => {
     try {
-      const status = await tauriGetLicenseStatus();
+      const [status, history] = await Promise.all([
+        tauriGetLicenseStatus(),
+        tauriGetHistory(),
+      ]);
       sortStore.update(s => ({
         ...s,
         licenseValid: status.valid,
         licenseTrial: status.trial,
         filesRemaining: status.filesRemaining,
       }));
+      recentSessions = history;
     } catch {
-      // backend not running in dev — leave defaults
+      // backend not running in dev
+    } finally {
+      historyLoading = false;
     }
   });
 
@@ -69,7 +77,7 @@
   function startSort() {
     if (!store.selectedFolder) return;
     resetSort();
-    sortStore.update(s => ({ ...s, stage: 'processing' }));
+    sortStore.update(s => ({ ...s, selectedFolder: store.selectedFolder, stage: 'processing' }));
     goto('/processing');
   }
 
@@ -78,9 +86,9 @@
     activating = true;
     activateError = '';
     try {
-      const { tauriActivateLicense, tauriGetLicenseStatus } = await import('$lib/tauri');
       await tauriActivateLicense(licenseKey.trim());
-      const status = await tauriGetLicenseStatus();
+      const { tauriGetLicenseStatus: getStatus } = await import('$lib/tauri');
+      const status = await getStatus();
       sortStore.update(s => ({
         ...s,
         licenseValid: status.valid,
@@ -95,15 +103,21 @@
       activating = false;
     }
   }
+
+  function folderBasename(path: string): string {
+    return path.split('/').pop() || path;
+  }
 </script>
 
-<div class="page">
-  <Logo subtitle="Organize your files with one click" />
-
+<ShellLayout>
   <div class="content">
+    <p class="section-label">New sort</p>
+
     <!-- Drop zone -->
     <div
-      class="dropzone {isDragOver ? 'drag-over' : ''} {store.selectedFolder ? 'selected' : ''}"
+      class="dropzone"
+      class:drag-over={isDragOver}
+      class:selected={!!store.selectedFolder}
       on:click={pickFolder}
       on:dragover={handleDragOver}
       on:dragleave={handleDragLeave}
@@ -113,11 +127,11 @@
       on:keydown={e => e.key === 'Enter' && pickFolder()}
       aria-label="Select or drop a folder"
     >
-      <svg class="drop-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <svg class="drop-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
       </svg>
       {#if store.selectedFolder}
-        <p class="drop-main">{store.selectedFolder.split('/').pop() || store.selectedFolder}</p>
+        <p class="drop-main">{folderBasename(store.selectedFolder)}</p>
         <p class="drop-sub">{store.selectedFolder}</p>
         <p class="drop-hint">Click to change folder</p>
       {:else}
@@ -131,16 +145,11 @@
       <TrialBanner filesRemaining={store.filesRemaining} on:activate={() => (showActivateModal = true)} />
     {/if}
 
-    <!-- Settings -->
-    <div class="settings">
+    <!-- Toggles -->
+    <div class="toggles">
       <Toggle
         label="Watch mode — keep this folder sorted automatically"
         bind:checked={$sortStore.watchMode}
-      />
-      <div class="divider"></div>
-      <Toggle
-        label="Preview before sorting — review folders before files move"
-        bind:checked={$sortStore.previewMode}
       />
     </div>
 
@@ -152,12 +161,41 @@
     >
       Sort folder
     </button>
+
+    <!-- Recent sorts -->
+    <div class="recent-section">
+      <p class="section-label">Recent</p>
+
+      {#if historyLoading}
+        <p class="empty-hint">Loading…</p>
+      {:else if recentSessions.length === 0}
+        <p class="empty-hint">No sorts yet. Drop a folder above to get started.</p>
+      {:else}
+        <div class="recent-list">
+          {#each recentSessions as session}
+            <div class="recent-row">
+              <svg class="recent-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span class="recent-folder">{folderBasename(session.folder)}</span>
+              <span class="recent-date">{session.date}</span>
+              <span class="recent-stats">{session.files_sorted} files</span>
+              <span class="recent-badge">{session.folders_created} folders</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </div>
-</div>
+</ShellLayout>
 
 <!-- Activate modal -->
 {#if showActivateModal}
-  <div class="modal-backdrop" on:click|self={() => (showActivateModal = false)} on:keydown={e => e.key === 'Escape' && (showActivateModal = false)} role="dialog" aria-modal="true" tabindex="-1">
+  <div class="modal-backdrop"
+    on:click|self={() => (showActivateModal = false)}
+    on:keydown={e => e.key === 'Escape' && (showActivateModal = false)}
+    role="dialog" aria-modal="true" tabindex="-1"
+  >
     <div class="modal">
       <h2>Activate license</h2>
       <p class="modal-desc">Enter your license key to unlock unlimited sorting.</p>
@@ -173,7 +211,7 @@
       {/if}
       <div class="modal-actions">
         <button class="btn-ghost" on:click={() => (showActivateModal = false)}>Cancel</button>
-        <button class="btn-primary" disabled={activating || !licenseKey.trim()} on:click={activateLicense}>
+        <button class="btn-primary-sm" disabled={activating || !licenseKey.trim()} on:click={activateLicense}>
           {activating ? 'Activating…' : 'Activate'}
         </button>
       </div>
@@ -182,49 +220,58 @@
 {/if}
 
 <style>
-  .page {
-    max-width: 520px;
-    margin: 0 auto;
-    padding: 0 20px 40px;
-  }
-
   .content {
+    padding: 48px 0 40px;
+    width: 100%;
+    max-width: 460px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
+  }
+
+  .section-label {
+    margin: 0 0 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   /* Drop zone */
   .dropzone {
-    border: 1.5px dashed var(--border-strong);
-    border-radius: 8px;
-    padding: 40px 24px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 10px;
+    padding: 32px 24px;
     text-align: center;
     cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
+    background: var(--bg);
     transition: border-color 0.15s, background 0.15s;
   }
 
   .dropzone:hover,
   .dropzone.drag-over {
-    border-color: var(--text);
+    border-color: var(--text-secondary);
     background: var(--bg-secondary);
   }
 
   .dropzone.selected {
     border-style: solid;
     border-color: var(--accent);
+    border-width: 1.5px;
   }
 
   .drop-icon {
-    color: var(--text-secondary);
+    opacity: 0.2;
     margin-bottom: 4px;
   }
 
   .dropzone.selected .drop-icon {
+    opacity: 0.6;
     color: var(--accent);
   }
 
@@ -249,35 +296,36 @@
     color: var(--text-secondary);
   }
 
-  /* Settings */
-  .settings {
-    border: 0.5px solid var(--border);
+  /* Toggles */
+  .toggles {
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
-    padding: 4px 16px;
+    padding: 4px 14px;
   }
 
-  .divider {
+  .toggle-divider {
     height: 0.5px;
     background: var(--border);
-    margin: 0 -16px;
+    margin: 0 -14px;
   }
 
   /* Buttons */
   .btn-primary {
     width: 100%;
-    padding: 12px;
+    padding: 11px;
     background: var(--text);
     color: var(--bg);
     border: none;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: opacity 0.15s;
   }
 
   .btn-primary:disabled {
-    opacity: 0.3;
+    background: var(--btn-disabled-bg);
+    color: var(--btn-disabled-text);
     cursor: not-allowed;
   }
 
@@ -285,25 +333,84 @@
     opacity: 0.85;
   }
 
-  .btn-ghost {
-    background: none;
-    border: 0.5px solid var(--border-strong);
-    border-radius: 6px;
-    padding: 10px 20px;
-    font-size: 14px;
-    cursor: pointer;
-    color: var(--text);
+  /* Recent section */
+  .recent-section {
+    margin-top: 10px;
   }
 
-  .btn-ghost:hover {
+  .empty-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 8px 0;
+  }
+
+  .recent-list {
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .recent-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-strong);
+    font-size: 12px;
+  }
+
+  .recent-row:last-child {
+    border-bottom: none;
+  }
+
+  .recent-row:hover {
     background: var(--bg-secondary);
+  }
+
+  .recent-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+
+  .recent-folder {
+    font-weight: 500;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recent-date {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  .recent-stats {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  .recent-badge {
+    background: var(--bg-secondary);
+    border: 0.5px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   /* Modal */
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.4);
+    background: rgba(0,0,0,0.35);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -314,30 +421,30 @@
     background: var(--bg);
     border: 0.5px solid var(--border-strong);
     border-radius: 10px;
-    padding: 28px 24px;
+    padding: 24px;
     width: 340px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
   .modal h2 {
     margin: 0;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 500;
   }
 
   .modal-desc {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
   }
 
   .key-input {
     border: 0.5px solid var(--border-strong);
     border-radius: 6px;
-    padding: 10px 12px;
-    font-size: 14px;
+    padding: 9px 12px;
+    font-size: 13px;
     width: 100%;
     outline: none;
     background: var(--bg);
@@ -351,7 +458,7 @@
 
   .error-text {
     margin: 0;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--error);
   }
 
@@ -362,8 +469,37 @@
     margin-top: 4px;
   }
 
-  .modal-actions .btn-primary {
-    width: auto;
-    padding: 10px 20px;
+  .btn-ghost {
+    background: none;
+    border: 0.5px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
+  }
+
+  .btn-ghost:hover {
+    background: var(--bg-secondary);
+  }
+
+  .btn-primary-sm {
+    padding: 8px 18px;
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .btn-primary-sm:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .btn-primary-sm:hover:not(:disabled) {
+    opacity: 0.85;
   }
 </style>

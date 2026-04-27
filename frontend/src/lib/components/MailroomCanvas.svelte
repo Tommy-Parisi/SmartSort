@@ -331,29 +331,29 @@
   onDestroy(() => { cancelAnimationFrame(raf); for (const fn of unlisteners) fn(); });
 </script>
 
-<div class="wrap" style="height: {act === 3 ? '220px' : '160px'}">
+<div class="wrap" style="height: {act === 3 ? '320px' : '240px'}">
   <svg viewBox="0 0 {W} {H}" width="100%" height="100%">
 
     <!-- Phase label -->
     <text x="20" y="14" font-size="7" font-family="ui-monospace, Menlo, monospace"
-      fill="rgba(0,0,0,0.4)" letter-spacing="0.1em">
+      fill="var(--text-secondary)" letter-spacing="0.1em">
       {act === 1 ? 'INSPECTING' : act === 2 ? 'CONSIDERING' : 'FILING'}
     </text>
 
     <!-- Inbox folder icon -->
     <g transform="translate({stackX} {stackY})" opacity={act === 1 ? 1 : 0.3}>
       <path d="M -22 -14 L -8 -14 L -4 -18 L 10 -18 L 10 -14 L 22 -14 L 22 14 L -22 14 Z"
-        fill="white" stroke="rgba(0,0,0,0.4)" stroke-width="0.6" />
-      <line x1="-22" y1="-8" x2="22" y2="-8" stroke="rgba(0,0,0,0.15)" stroke-width="0.6" />
+        fill="var(--bg)" stroke="var(--text-faint)" stroke-width="0.6" />
+      <line x1="-22" y1="-8" x2="22" y2="-8" stroke="var(--border)" stroke-width="0.6" />
     </g>
 
     <!-- Read tray -->
     <g transform="translate({trayX} {trayY})">
       <rect x="-26" y="-16" width="52" height="32" rx="2"
-        fill="rgba(0,0,0,0.025)" stroke="rgba(0,0,0,0.3)" stroke-width="0.6" />
+        fill="var(--hover-bg)" stroke="var(--border)" stroke-width="0.6" />
       <text x="0" y="-22" text-anchor="middle" font-size="7"
         font-family="ui-monospace, Menlo, monospace"
-        fill="rgba(0,0,0,0.45)" letter-spacing="0.06em">READ</text>
+        fill="var(--text-secondary)" letter-spacing="0.06em">READ</text>
     </g>
 
     <!-- ── ACT 1 ─────────────────────────────────────────────────────────── -->
@@ -364,12 +364,12 @@
         {@const stamped  = progress > 0.55}
         <g transform="translate({pos.x} {pos.y}) rotate({pos.tilt})">
           <rect x="-15" y="-11" width="30" height="22" rx="2"
-            fill={stamped ? `oklch(0.97 0.03 ${card.hue})` : 'white'}
-            stroke={stamped ? `oklch(0.55 0.16 ${card.hue})` : 'rgba(0,0,0,0.45)'}
+            fill={stamped ? `oklch(0.97 0.03 ${card.hue})` : 'var(--bg)'}
+            stroke={stamped ? `oklch(0.55 0.16 ${card.hue})` : 'var(--border-strong)'}
             stroke-width="0.7" />
           {#each [-6, -3, 0] as ly, li}
             <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
-              stroke="rgba(0,0,0,0.3)" stroke-width="0.4" />
+              stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="0.4" />
           {/each}
           <text x="12" y="8" text-anchor="end" font-size="5.5"
             font-family="ui-monospace, Menlo, monospace"
@@ -379,9 +379,9 @@
 
       {#if inspectName}
         <text x={W/2} y="80" text-anchor="middle" font-size="9"
-          font-family="ui-monospace, Menlo, monospace" fill="rgba(0,0,0,0.6)">
-          <tspan fill="rgba(0,0,0,0.4)">inspecting · </tspan
-          ><tspan fill="rgba(0,0,0,0.85)">{inspectName}.{inspectExt}</tspan>
+          font-family="ui-monospace, Menlo, monospace" fill="var(--text-secondary)">
+          <tspan fill="var(--text-faint)">inspecting · </tspan
+          ><tspan fill="var(--text)">{inspectName}.{inspectExt}</tspan>
         </text>
       {/if}
     {/if}
@@ -397,19 +397,19 @@
       {#each [3, 2, 1] as d}
         <rect x={trayX - 14 + d * 0.5} y={trayY - 11 - d * 0.8}
           width="29" height="21" rx="2"
-          fill="rgba(255,255,255,0.9)" stroke="rgba(0,0,0,0.18)" stroke-width="0.5" />
+          fill="var(--bg)" stroke="var(--border)" stroke-width="0.5" />
       {/each}
 
       <!-- Flipping card — travels tray → inspect → tray -->
       {#if flipCard}
         <g transform="translate({fp.x} {fp.y}) rotate({fp.tilt})">
           <rect x="-15" y="-11" width="30" height="22" rx="2"
-            fill={atCenter ? `oklch(0.97 0.03 ${flipCard.hue})` : 'white'}
-            stroke={atCenter ? `oklch(0.55 0.16 ${flipCard.hue})` : 'rgba(0,0,0,0.45)'}
+            fill={atCenter ? `oklch(0.97 0.03 ${flipCard.hue})` : 'var(--bg)'}
+            stroke={atCenter ? `oklch(0.55 0.16 ${flipCard.hue})` : 'var(--border-strong)'}
             stroke-width="0.7" />
           {#each [-6, -3, 0] as ly, li}
             <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
-              stroke="rgba(0,0,0,0.3)" stroke-width="0.4" />
+              stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="0.4" />
           {/each}
           {#if atCenter}
             <text x="12" y="8" text-anchor="end" font-size="5.5"
@@ -423,25 +423,25 @@
       {#if atCenter}
         {@const osc = Math.sin(now / 480) * 5}
         <g transform="translate({inspectX + 20 + osc * 0.4} {ACT2_INSPECT_Y - 16 + osc})" opacity="0.7">
-          <circle r="10" fill="none" stroke="rgba(0,0,0,0.5)" stroke-width="1.5" />
-          <line x1="7" y1="7" x2="15" y2="15" stroke="rgba(0,0,0,0.5)" stroke-width="2" stroke-linecap="round" />
+          <circle r="10" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" />
+          <line x1="7" y1="7" x2="15" y2="15" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" />
         </g>
       {/if}
 
       <text x={W / 2} y="118" text-anchor="middle" font-size="11"
-        font-family='"Jacquard 24", serif' fill="rgba(0,0,0,0.7)">
+        font-family='"Jacquard 24", serif' fill="var(--text)">
         {THOUGHTS[thoughtIdx]}
       </text>
       {#if namedSlotCount > 0}
         <text x={W / 2} y="135" text-anchor="middle" font-size="8.5"
-          font-family="ui-monospace, Menlo, monospace" fill="rgba(0,0,0,0.5)">
+          font-family="ui-monospace, Menlo, monospace" fill="var(--text-secondary)">
           {namedSlotCount} folder{namedSlotCount !== 1 ? 's' : ''} identified
         </text>
       {:else}
         {#each [0, 1, 2] as i}
           {@const ph = ((now / 800) + i * 0.33) % 1}
           {@const op = 0.25 + (1 - Math.abs(ph - 0.5) * 2) * 0.6}
-          <circle cx={W / 2 - 8 + i * 8} cy="132" r="1.6" fill="rgba(0,0,0,0.7)" opacity={op} />
+          <circle cx={W / 2 - 8 + i * 8} cy="132" r="1.6" fill="var(--text)" opacity={op} />
         {/each}
       {/if}
     {/if}
@@ -457,7 +457,7 @@
               stroke="oklch(0.55 0.16 {card.hue})" stroke-width="0.7" />
             {#each [-6, -3, 0] as ly, li}
               <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
-                stroke="rgba(0,0,0,0.3)" stroke-width="0.4" />
+                stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="0.4" />
             {/each}
             <text x="12" y="8" text-anchor="end" font-size="5.5"
               font-family="ui-monospace, Menlo, monospace"
@@ -470,7 +470,7 @@
               stroke="oklch(0.55 0.16 {card.hue})" stroke-width="0.7" />
             {#each [-6, -3, 0] as ly, li}
               <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
-                stroke="rgba(0,0,0,0.3)" stroke-width="0.4" />
+                stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="0.4" />
             {/each}
             <text x="12" y="8" text-anchor="end" font-size="5.5"
               font-family="ui-monospace, Menlo, monospace"
@@ -488,10 +488,10 @@
           fill="oklch(0.97 0.04 {slot.hue})"
           stroke="oklch(0.6 0.13 {slot.hue})"
           stroke-width="0.6" />
-        <rect x={sp.x + 1} y={sp.y + 1} width={slotW - 2} height="2.5" fill="rgba(0,0,0,0.08)" />
+        <rect x={sp.x + 1} y={sp.y + 1} width={slotW - 2} height="2.5" fill="var(--text)" fill-opacity="0.08" />
         {#each Array.from({ length: Math.min(4, Math.ceil(fills[si] / 2)) }) as _, fi}
           <rect x={sp.x + 4} y={sp.y + slotH - 4 - fi * 1.6} width={slotW - 8} height="2.5"
-            fill="white" stroke="oklch(0.55 0.18 {slot.hue})" stroke-width="0.4" />
+            fill="var(--bg)" stroke="oklch(0.55 0.18 {slot.hue})" stroke-width="0.4" />
         {/each}
         <text x={sp.x + 5} y={sp.y + 11} font-size="7.5"
           font-family='"Jacquard 24", serif' font-weight="600"

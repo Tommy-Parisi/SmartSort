@@ -6,16 +6,45 @@
 }
 
 :root {
-  --bg: #ffffff;
-  --bg-secondary: #f7f7f6;
-  --text: #111111;
-  --text-secondary: rgba(17, 17, 17, 0.5);
-  --border: rgba(0, 0, 0, 0.12);
-  --border-strong: rgba(0, 0, 0, 0.2);
+  --bg: #FAFAF8;
+  --bg-secondary: #E8E4DC;
+  --text: #1a1a1a;
+  --text-secondary: rgba(0,0,0,0.5);
+  --border: rgba(0,0,0,0.15);
+  --border-strong: rgba(0,0,0,0.38);
   --accent: #1D9E75;
-  --accent-bg: rgba(29, 158, 117, 0.08);
+  --accent-bg: rgba(29, 158, 117, 0.1);
   --error: #c0392b;
   --error-bg: #fdf2f2;
+  /* button disabled state */
+  --btn-disabled-bg: rgba(0,0,0,0.07);
+  --btn-disabled-text: rgba(0,0,0,0.28);
+  /* faint text (upcoming steps, separators) */
+  --text-faint: rgba(0,0,0,0.28);
+  /* hover overlay on backgrounds */
+  --hover-bg: rgba(0,0,0,0.04);
+}
+
+html.dark {
+  --bg: #1c1c1e;
+  --bg-secondary: #2a2a2d;
+  --text: #f0ede8;
+  --text-secondary: rgba(255,255,255,0.5);
+  --border: rgba(255,255,255,0.12);
+  --border-strong: rgba(255,255,255,0.28);
+  --accent: #22b585;
+  --accent-bg: rgba(34, 181, 133, 0.14);
+  --error: #e05c4b;
+  --error-bg: rgba(224, 92, 75, 0.12);
+  --btn-disabled-bg: rgba(255,255,255,0.07);
+  --btn-disabled-text: rgba(255,255,255,0.28);
+  --text-faint: rgba(255,255,255,0.28);
+  --hover-bg: rgba(255,255,255,0.06);
+}
+
+html.dark body {
+  background: var(--bg);
+  color: var(--text);
 }
 
 *, *::before, *::after {
@@ -25,43 +54,43 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-family: system-ui, -apple-system, 'Inter', sans-serif;
-  font-size: 14px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
+  height: 100%;
   user-select: none;
+}
+
+#svelte {
+  height: 100%;
 }
 
 button {
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
 }
 
 input, select, textarea {
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 a {
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
 }
 
-/* Allow text selection on content elements (not span — too many UI uses) */
 p, h1, h2, h3, h4, li, .error-text, .selectable {
   user-select: text;
 }
 
-/* Kill all selection during pointer drags so moving the cursor over other rows
-   doesn't highlight their text */
 body.dragging, body.dragging * {
   user-select: none !important;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
 }
@@ -69,6 +98,6 @@ body.dragging, body.dragging * {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: rgba(0,0,0,0.15);
   border-radius: 2px;
 }

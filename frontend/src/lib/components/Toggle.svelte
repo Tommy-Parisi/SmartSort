@@ -12,7 +12,7 @@
     <input
       type="checkbox"
       bind:checked
-      {id}
+      id={uid}
       on:change
     />
     <div class="thumb"></div>

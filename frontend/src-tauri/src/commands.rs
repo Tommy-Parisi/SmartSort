@@ -455,6 +455,158 @@ pub async fn get_license_status() -> Result<Value, String> {
         .map_err(|e| format!("Failed to parse license status: {}", e))
 }
 
+// ── History ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct SortSession {
+    pub folder: String,
+    pub date: String,
+    pub files_sorted: usize,
+    pub folders_created: usize,
+    pub session_id: String,
+}
+
+fn days_to_date_str(days_since_epoch: i64) -> String {
+    // Civil calendar algorithm (no external crates required)
+    let z = days_since_epoch + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let _y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let month_name = months[(m as usize).saturating_sub(1).min(11)];
+    format!("{} {}", month_name, d)
+}
+
+#[tauri::command]
+pub async fn get_history() -> Result<Vec<SortSession>, String> {
+    let home = home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+    let log_path = home.join(".smartsort").join("move_log.jsonl");
+
+    if !log_path.exists() {
+        return Ok(vec![]);
+    }
+
+    use std::io::{BufRead, BufReader};
+    let file = std::fs::File::open(&log_path).map_err(|e| e.to_string())?;
+    let reader = BufReader::new(file);
+
+    // (timestamp, source_path, dest_path)
+    let mut entries: Vec<(f64, String, String)> = Vec::new();
+
+    for line in reader.lines().flatten() {
+        if line.trim().is_empty() { continue; }
+        if let Ok(val) = serde_json::from_str::<Value>(&line) {
+            let ts = val["timestamp"].as_f64()
+                .or_else(|| val["ts"].as_f64())
+                .unwrap_or(0.0);
+            let source = val["source"].as_str()
+                .or_else(|| val["src"].as_str())
+                .or_else(|| val["from"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let dest = val["destination"].as_str()
+                .or_else(|| val["dest"].as_str())
+                .or_else(|| val["to"].as_str())
+                .unwrap_or("")
+                .to_string();
+            if !source.is_empty() {
+                entries.push((ts, source, dest));
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        return Ok(vec![]);
+    }
+
+    entries.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let home_str = home.to_string_lossy().to_string();
+    let mut sessions: Vec<SortSession> = Vec::new();
+    let mut i = 0;
+    let mut session_num: u64 = 0;
+
+    while i < entries.len() {
+        let session_start_ts = entries[i].0;
+        let mut j = i;
+        while j < entries.len() && entries[j].0 - session_start_ts <= 300.0 {
+            j += 1;
+        }
+        let session_entries = &entries[i..j];
+
+        // Derive the sorted folder from the first source path's parent
+        let source_path = std::path::Path::new(&session_entries[0].1);
+        let folder = source_path
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| session_entries[0].1.clone())
+            .replace(&home_str, "~");
+
+        // Count unique destination folders
+        let mut dest_folders = std::collections::HashSet::new();
+        for (_, _, dest) in session_entries {
+            if !dest.is_empty() {
+                if let Some(parent) = std::path::Path::new(dest).parent() {
+                    dest_folders.insert(parent.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        let days = session_start_ts as i64 / 86400;
+        let date = days_to_date_str(days);
+
+        session_num += 1;
+        sessions.push(SortSession {
+            folder,
+            date,
+            files_sorted: session_entries.len(),
+            folders_created: dest_folders.len(),
+            session_id: format!("session_{}", session_num),
+        });
+
+        i = j;
+    }
+
+    sessions.reverse();
+    sessions.truncate(10);
+    Ok(sessions)
+}
+
+#[tauri::command]
+pub async fn open_log_folder() -> Result<(), String> {
+    let home = home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+    let log_dir = home.join(".smartsort");
+
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(log_dir.to_string_lossy().as_ref())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(log_dir.to_string_lossy().as_ref())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(log_dir.to_string_lossy().as_ref())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 // ── Legacy synchronous commands (kept for compatibility) ─────────────────────
 
 #[tauri::command]

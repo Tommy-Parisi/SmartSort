@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { open } from '@tauri-apps/plugin-dialog';
-  import Logo from '$lib/components/Logo.svelte';
+  import ShellLayout from '$lib/components/ShellLayout.svelte';
   import { sortStore } from '$lib/stores/sort';
   import {
     tauriGetDaemonStatus,
@@ -27,7 +27,6 @@
     return `${Math.floor(diff / 3600)}h ago`;
   }
 
-  // refresh every 30s for timestamps
   let interval: ReturnType<typeof setInterval>;
 
   onMount(async () => {
@@ -36,7 +35,6 @@
       watchedFolders = status.watchedFolders;
       recentActivity = status.recentActivity.slice(-20).reverse();
     } catch {
-      // dev — show stored folder
       if (store.selectedFolder) watchedFolders = [store.selectedFolder];
     }
 
@@ -52,7 +50,7 @@
     });
 
     interval = setInterval(() => {
-      recentActivity = [...recentActivity]; // trigger reactivity for timeAgo
+      recentActivity = [...recentActivity];
     }, 30000);
   });
 
@@ -93,22 +91,32 @@
     const now = new Date();
     return d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
   }).length;
+
+  $: isWatching = watchedFolders.length > 0;
 </script>
 
-<div class="page">
-  <div class="logo-row">
-    <Logo subtitle="{watchedFolders.length} folders · {totalToday} files sorted today" />
-    <span class="watch-badge">watching</span>
-  </div>
-
+<ShellLayout>
   <div class="content">
+
+    <!-- Status header -->
+    <div class="status-header">
+      <div class="status-dot" class:active={isWatching}></div>
+      <span class="status-text">
+        {#if isWatching}
+          Watching {watchedFolders.length} {watchedFolders.length === 1 ? 'folder' : 'folders'} · {totalToday} files sorted today
+        {:else}
+          Not watching — add a folder to start
+        {/if}
+      </span>
+    </div>
+
     <!-- Watched folders -->
     <section class="section">
       <p class="section-label">Watched folders</p>
       <div class="watched-list">
         {#each watchedFolders as folder}
           <div class="watched-row">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
             <span class="folder-path">{folder}</span>
@@ -139,40 +147,41 @@
         </div>
       {/if}
     </section>
+
   </div>
-</div>
+</ShellLayout>
 
 <style>
-  .page {
-    max-width: 520px;
-    margin: 0 auto;
-    padding: 0 20px 40px;
-  }
-
-  .logo-row {
-    position: relative;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-  }
-
-  .watch-badge {
-    position: absolute;
-    right: 0;
-    top: 36px;
-    background: var(--accent-bg);
-    color: var(--accent);
-    border: 0.5px solid var(--accent);
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-  }
-
   .content {
+    padding: 24px;
+    width: 100%;
+    max-width: 600px;
     display: flex;
     flex-direction: column;
     gap: 20px;
+  }
+
+  .status-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--border-strong);
+    flex-shrink: 0;
+  }
+
+  .status-dot.active {
+    background: var(--accent);
+  }
+
+  .status-text {
+    font-size: 12px;
+    color: var(--text-secondary);
   }
 
   .section {
@@ -183,15 +192,16 @@
 
   .section-label {
     margin: 0;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.04em;
     color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .watched-list {
     border: 0.5px solid var(--border);
-    border-radius: 8px;
+    border-radius: 9px;
     overflow: hidden;
   }
 
@@ -233,11 +243,12 @@
     background: none;
     border: none;
     padding: 10px 12px;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--accent);
     cursor: pointer;
     text-align: left;
     width: 100%;
+    font-family: inherit;
   }
 
   .btn-add:hover {
@@ -246,7 +257,7 @@
 
   .activity-list {
     border: 0.5px solid var(--border);
-    border-radius: 8px;
+    border-radius: 9px;
     overflow: hidden;
     max-height: 280px;
     overflow-y: auto;
@@ -291,6 +302,6 @@
     margin: 0;
     font-size: 12px;
     color: var(--text-secondary);
-    padding: 12px 0;
+    padding: 4px 0;
   }
 </style>

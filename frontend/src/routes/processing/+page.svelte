@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { goto, beforeNavigate } from '$app/navigation';
-  import Logo from '$lib/components/Logo.svelte';
+  import SortFlowLayout from '$lib/components/SortFlowLayout.svelte';
   import MailroomCanvas from '$lib/components/MailroomCanvas.svelte';
   import { sortStore } from '$lib/stores/sort';
   import {
@@ -39,7 +39,6 @@
   let sortRunning = false;
   let maxProgressPct = 0;
 
-  // Error states
   let errorMessage   = '';
   let showTrialModal = false;
   let licenseKey     = '';
@@ -66,7 +65,8 @@
 
   $: foldersFound = store.foldersDiscovered.length;
 
-  $: phase = foldersFound > 0 ? 'sorting' : 'processing';
+  // Step 1 = Analyzing (extracting/embedding), Step 2 = Sorting (clustering/naming/placing)
+  $: flowStep = (currentStage === 'extracting' || currentStage === 'embedding') ? 1 : 2;
 
   $: folderName = store.selectedFolder?.split('/').pop() ?? '';
 
@@ -99,7 +99,6 @@
 
       const now = Date.now();
       if (!sortStartTs) sortStartTs = now;
-      // weights per file sum to 100, so actual file count = files_total / 100
       if (!actualTotal && e.files_total > 0) actualTotal = Math.round(e.files_total / 100);
       if (e.stage === 'extracting') extractedCount++;
       if (e.stage === 'placing')    placedCount++;
@@ -142,7 +141,6 @@
       }
     }));
 
-    // Start the pipeline after all listeners are registered
     sortRunning = true;
     tauriStartSort(store.selectedFolder, store.watchMode, store.previewMode)
       .catch(e => console.error('start_sort failed:', e));
@@ -160,7 +158,6 @@
       await tauriActivateLicense(licenseKey.trim());
       showTrialModal = false;
       licenseKey     = '';
-      // Re-start the sort now that the license is active
       if (store.selectedFolder) {
         tauriStartSort(store.selectedFolder, store.watchMode, store.previewMode)
           .catch(e => console.error('restart start_sort failed:', e));
@@ -178,19 +175,17 @@
   }
 </script>
 
-<div class="page">
-  <Logo subtitle={store.selectedFolder ?? ''} />
-
-  <div class="content">
+<SortFlowLayout step={flowStep}>
+  <div class="content-area">
     {#if errorMessage}
-      <!-- Generic pipeline error -->
       <div class="error-state">
         <p class="error-text">{errorMessage}</p>
-        <button class="btn-ghost" on:click={() => goto('/')}>Go back</button>
       </div>
     {:else}
-      <!-- Normal processing UI -->
-      <p class="phase-label">{phase === 'processing' ? 'Processing your files' : 'Sorting your files'}</p>
+      <p class="phase-label">
+        {foldersFound > 0 ? 'Sorting your files' : 'Processing your files'}
+      </p>
+
       <MailroomCanvas on:complete={() => goto(store.previewMode ? '/preview' : '/done')} />
 
       <div class="progress-track">
@@ -211,11 +206,17 @@
         <span class="dot">·</span>
         <span>{estETA}</span>
       </div>
-
-      <button class="btn-ghost" on:click={cancel}>Cancel</button>
     {/if}
   </div>
-</div>
+
+  <svelte:fragment slot="footer-left">
+    {#if errorMessage}
+      <button class="btn-ghost" on:click={() => goto('/')}>Go back</button>
+    {:else}
+      <button class="btn-ghost" on:click={cancel}>Cancel</button>
+    {/if}
+  </svelte:fragment>
+</SortFlowLayout>
 
 <!-- Trial limit modal -->
 {#if showTrialModal}
@@ -268,22 +269,19 @@
 {/if}
 
 <style>
-  .page {
-    max-width: 520px;
-    margin: 0 auto;
-    padding: 0 20px 40px;
-  }
-
-  .content {
+  .content-area {
+    flex: 1;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
     gap: 12px;
+    overflow-y: auto;
   }
 
-  /* ── Processing UI ── */
-
   .phase-label {
-    margin: 0 0 -4px;
+    margin: 0;
     font-size: 12px;
     font-weight: 500;
     color: var(--text-secondary);
@@ -291,8 +289,10 @@
   }
 
   .progress-track {
+    width: 100%;
+    max-width: 420px;
     height: 2px;
-    background: var(--border);
+    background: var(--hover-bg);
     border-radius: 1px;
     overflow: hidden;
   }
@@ -324,22 +324,18 @@
   }
 
   .btn-ghost {
-    align-self: center;
     background: none;
     border: 0.5px solid var(--border-strong);
     border-radius: 6px;
-    padding: 8px 24px;
-    font-size: 13px;
+    padding: 8px 20px;
+    font-size: 12px;
     cursor: pointer;
     color: var(--text);
-    margin-top: 8px;
   }
 
   .btn-ghost:hover {
     background: var(--bg-secondary);
   }
-
-  /* ── Generic error state ── */
 
   .error-state {
     display: flex;
@@ -351,19 +347,18 @@
 
   .error-text {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--error);
     text-align: center;
     line-height: 1.5;
   }
 
-  /* ── Trial modal ── */
-
+  /* Trial modal */
   .modal-backdrop {
     position: fixed;
     inset: 0;
     min-height: 100vh;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0,0,0,0.4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -374,24 +369,24 @@
     background: var(--bg);
     border: 0.5px solid var(--border-strong);
     border-radius: 12px;
-    padding: 32px;
+    padding: 28px;
     max-width: 360px;
     width: 90%;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
   }
 
   .modal-title {
     margin: 0;
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 500;
     color: var(--text);
   }
 
   .modal-sub {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
     line-height: 1.6;
   }
@@ -403,26 +398,26 @@
   }
 
   .price {
-    font-size: 32px;
+    font-size: 28px;
     font-weight: 500;
     color: var(--text);
     line-height: 1;
   }
 
   .price-label {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-secondary);
   }
 
   .btn-buy {
     display: block;
     width: 100%;
-    padding: 12px;
+    padding: 11px;
     background: var(--text);
     color: var(--bg);
     border: none;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     text-align: center;
     text-decoration: none;
@@ -444,8 +439,8 @@
     flex: 1;
     border: 0.5px solid var(--border-strong);
     border-radius: 6px;
-    padding: 9px 12px;
-    font-size: 13px;
+    padding: 8px 10px;
+    font-size: 12px;
     font-family: monospace;
     background: var(--bg);
     color: var(--text);
@@ -461,8 +456,8 @@
     background: none;
     border: 0.5px solid var(--border-strong);
     border-radius: 6px;
-    padding: 9px 16px;
-    font-size: 13px;
+    padding: 8px 14px;
+    font-size: 12px;
     cursor: pointer;
     color: var(--text);
     white-space: nowrap;
@@ -480,7 +475,7 @@
 
   .activate-error {
     margin: 0;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--error);
   }
 
@@ -493,6 +488,7 @@
     cursor: pointer;
     text-align: center;
     align-self: center;
+    font-family: inherit;
   }
 
   .btn-back:hover {

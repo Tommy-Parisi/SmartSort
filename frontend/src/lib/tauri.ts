@@ -94,6 +94,20 @@ export const tauriActivateLicense = (key: string) =>
 export const tauriGetLicenseStatus = () =>
   invoke<LicenseStatus>('get_license_status');
 
+export interface SortSession {
+  folder: string;
+  date: string;
+  files_sorted: number;
+  folders_created: number;
+  session_id: string;
+}
+
+export const tauriGetHistory = () =>
+  invoke<SortSession[]>('get_history');
+
+export const tauriOpenLogFolder = () =>
+  invoke<void>('open_log_folder');
+
 // ── Event listeners ───────────────────────────────────────────────────────────
 
 export const onFileAssigned = (cb: (e: FileAssignedEvent) => void): Promise<UnlistenFn> =>

@@ -10,8 +10,11 @@
     "windows": [
       {
         "title": "Smart Sort",
-        "width": 900,
-        "height": 700
+        "width": 920,
+        "height": 600,
+        "minWidth": 800,
+        "minHeight": 520,
+        "resizable": true
       }
     ]
   },

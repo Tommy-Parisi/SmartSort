@@ -18,6 +18,9 @@ pub fn run() {
             // License
             commands::activate_license,
             commands::get_license_status,
+            // History
+            commands::get_history,
+            commands::open_log_folder,
             // Legacy
             commands::select_files,
             commands::select_folder,
