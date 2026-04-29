@@ -10,6 +10,14 @@ _HEIC_EXTS = {".heic", ".heif"}
 _OCR_TOKEN_THRESHOLD = 8
 _PHOTO_FALLBACK_MIN_TOKENS = 5
 
+# Extensions that commonly come from cameras and are unlikely to contain OCR-readable text
+_CAMERA_EXTS = {".heic", ".heif", ".jpg", ".jpeg"}
+# Common camera filename prefixes (IMG_XXXX, DSC_XXXX, PXL_XXXX, numeric date stamps, etc.)
+_CAMERA_NAME_RE = re.compile(
+    r'^(IMG|DSC|DCIM|DSCF|MOV|VID|PXL|[0-9]{8}[_-])',
+    re.IGNORECASE,
+)
+
 CREATIVE_SOFTWARE = {
     'figma', 'sketch', 'adobe', 'illustrator', 'photoshop', 'canva',
     'snagit', 'snip', 'grab', 'greenshot', 'lightshot',
@@ -119,6 +127,10 @@ def _creative_identity(file_path: Path, exif_parts: list[str]) -> str:
     return token_cap(" ".join(parts))
 
 
+def _looks_like_camera_photo(p: Path) -> bool:
+    return p.suffix.lower() in _CAMERA_EXTS and bool(_CAMERA_NAME_RE.match(p.stem))
+
+
 class OCRExtractorAgent:
     def extract(self, file_path: str) -> str:
         p = Path(file_path)
@@ -131,13 +143,15 @@ class OCRExtractorAgent:
         except Exception:
             exif_parts = []
 
-        # OCR first — readable images (including screenshots with text) embed as documents
-        ocr_text = _ocr_text(p)
-        if _ocr_token_count(ocr_text) >= _OCR_TOKEN_THRESHOLD:
-            stem = clean_filename_stem(file_path)
-            if stem:
-                return token_cap(f"scanned document {stem} {ocr_text}")
-            return token_cap(f"scanned document {ocr_text}")
+        # Camera photos (IMG_XXXX.jpg, DSC_XXXX.heic, etc.) never contain OCR-readable
+        # text — skip the expensive tesseract call and go straight to EXIF routing.
+        if not _looks_like_camera_photo(p):
+            ocr_text = _ocr_text(p)
+            if _ocr_token_count(ocr_text) >= _OCR_TOKEN_THRESHOLD:
+                stem = clean_filename_stem(file_path)
+                if stem:
+                    return token_cap(f"scanned document {stem} {ocr_text}")
+                return token_cap(f"scanned document {ocr_text}")
 
         # Filename-based screenshot detection — Mac/Windows screenshots have no EXIF but
         # a predictable name pattern. Route before EXIF tiers so they never land in Photos.
