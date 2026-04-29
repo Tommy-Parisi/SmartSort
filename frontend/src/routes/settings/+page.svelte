@@ -68,7 +68,7 @@
             <input
               class="key-input"
               type="text"
-              placeholder="License key"
+              placeholder="Paste your Gumroad license key"
               bind:value={licenseKey}
               on:keydown={e => e.key === 'Enter' && activateLicense()}
             />
@@ -145,7 +145,6 @@
     font-size: 10px;
     font-weight: 600;
     color: var(--text-secondary);
-    text-transform: uppercase;
     letter-spacing: 0.06em;
   }
 

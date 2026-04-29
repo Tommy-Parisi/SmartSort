@@ -8,6 +8,7 @@
     type FolderDiscoveredEvent,
   } from '../tauri';
   import type { UnlistenFn } from '@tauri-apps/api/event';
+  import { theme } from '$lib/themeStore';
 
 
   const dispatch = createEventDispatcher();
@@ -22,18 +23,23 @@
   // Pigeonhole grid
   const SCOLS = 5, MAX_SLOTS = 10;
   const slotW = 86, slotH = 30, slotGapX = 4, slotGapY = 4;
+  const SLOT_AREA_TOP = 76; // slots start below the source/inspect icons
 
-  function slotPos(idx: number, count: number = MAX_SLOTS) {
+  function slotPos(idx: number, count: number) {
     const cols = Math.min(count, SCOLS);
-    const rows = Math.ceil(count / cols);
     const gw   = cols * slotW + (cols - 1) * slotGapX;
     const x0   = (W - gw) / 2;
-    const y0   = H - (rows * slotH + (rows - 1) * slotGapY) - 8;
     return {
       x: x0 + (idx % cols) * (slotW + slotGapX),
-      y: y0 + Math.floor(idx / cols) * (slotH + slotGapY),
+      y: SLOT_AREA_TOP + Math.floor(idx / cols) * (slotH + slotGapY),
     };
   }
+
+  // Dynamic SVG height — grows when slots overflow into extra rows
+  $: slotRows = act === 3 ? Math.max(1, Math.ceil(Math.min(namedSlotCount, 40) / SCOLS)) : 1;
+  $: svgH = act === 3
+    ? Math.max(H, SLOT_AREA_TOP + slotRows * slotH + (slotRows - 1) * slotGapY + 20)
+    : H;
 
   // ── Palette ────────────────────────────────────────────────────────────────
   const SLOT_HUES = [20, 145, 220, 280, 40, 330, 162, 270, 45, 180];
@@ -57,6 +63,30 @@
     let s = seed;
     return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
   }
+
+  // ── Theme-aware color helpers ──────────────────────────────────────────────
+  $: isDark = $theme === 'dark';
+
+  // Card fill (stamped / inspected / in-tray)
+  $: cFL = isDark ? 0.22 : 0.97;  // lightness
+  $: cFC = isDark ? 0.06 : 0.03;  // chroma
+  // Card stroke
+  $: cSL = isDark ? 0.68 : 0.55;
+  $: cSC = isDark ? 0.14 : 0.16;
+  // Card ext-type text
+  $: cTL = isDark ? 0.75 : 0.40;
+  // Slot fill
+  $: sFL = isDark ? 0.20 : 0.97;
+  $: sFC = isDark ? 0.05 : 0.04;
+  // Slot stroke
+  $: sSL = isDark ? 0.62 : 0.60;
+  $: sSC = isDark ? 0.12 : 0.13;
+  // File-card stroke inside slot
+  $: sCL = isDark ? 0.65 : 0.55;
+  // Slot name text
+  $: stL = isDark ? 0.80 : 0.32;
+  // Slot count text
+  $: snL = isDark ? 0.75 : 0.40;
 
   // ── Types ──────────────────────────────────────────────────────────────────
   interface StreamCard { id: number; name: string; ext: string; hue: number; born: number; }
@@ -216,7 +246,7 @@
 
     if (eventQueue.length > 0 && ts >= nextDrainTs) {
       processEvent(eventQueue.shift()!, ts);
-      
+
       // Dynamic drain rate based on backlog
       let baseDelay = 450;
       if (eventQueue.length > 15) baseDelay = 150;
@@ -232,14 +262,14 @@
     // Act 1 -> 2 transition logic: use backendStage (not drain-throttled lastStage)
     const explicitThinkingTrigger = backendStage === 'clustering' || backendStage === 'naming' || backendStage === 'placing';
     const silenceFallbackTrigger = lastEventTs > 0 && ts - lastEventTs > 15000;
-    
+
     if (act === 1 && streamCards.length === 0) {
       if (explicitThinkingTrigger || silenceFallbackTrigger || sortDone) {
         if (!act2StartedTs) {
-          act2StartedTs = ts; 
+          act2StartedTs = ts;
         } else if (ts - act2StartedTs > 400) {
           act = 2;
-          act2StartedTs = ts; 
+          act2StartedTs = ts;
         }
       }
     }
@@ -331,8 +361,8 @@
   onDestroy(() => { cancelAnimationFrame(raf); for (const fn of unlisteners) fn(); });
 </script>
 
-<div class="wrap" style="height: {act === 3 ? '320px' : '240px'}">
-  <svg viewBox="0 0 {W} {H}" width="100%" height="100%">
+<div class="wrap" style="height: {act === 3 ? Math.round(svgH / H * 280) + 'px' : '200px'}">
+  <svg viewBox="0 0 {W} {svgH}" width="100%" height="100%">
 
     <!-- Phase label -->
     <text x="20" y="14" font-size="7" font-family="ui-monospace, Menlo, monospace"
@@ -364,8 +394,8 @@
         {@const stamped  = progress > 0.55}
         <g transform="translate({pos.x} {pos.y}) rotate({pos.tilt})">
           <rect x="-15" y="-11" width="30" height="22" rx="2"
-            fill={stamped ? `oklch(0.97 0.03 ${card.hue})` : 'var(--bg)'}
-            stroke={stamped ? `oklch(0.55 0.16 ${card.hue})` : 'var(--border-strong)'}
+            fill={stamped ? `oklch(${cFL} ${cFC} ${card.hue})` : 'var(--bg)'}
+            stroke={stamped ? `oklch(${cSL} ${cSC} ${card.hue})` : 'var(--border-strong)'}
             stroke-width="0.7" />
           {#each [-6, -3, 0] as ly, li}
             <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
@@ -373,7 +403,7 @@
           {/each}
           <text x="12" y="8" text-anchor="end" font-size="5.5"
             font-family="ui-monospace, Menlo, monospace"
-            fill="oklch(0.4 0.20 {card.hue})">.{card.ext}</text>
+            fill={`oklch(${cTL} 0.20 ${card.hue})`}>.{card.ext}</text>
         </g>
       {/each}
 
@@ -404,8 +434,8 @@
       {#if flipCard}
         <g transform="translate({fp.x} {fp.y}) rotate({fp.tilt})">
           <rect x="-15" y="-11" width="30" height="22" rx="2"
-            fill={atCenter ? `oklch(0.97 0.03 ${flipCard.hue})` : 'var(--bg)'}
-            stroke={atCenter ? `oklch(0.55 0.16 ${flipCard.hue})` : 'var(--border-strong)'}
+            fill={atCenter ? `oklch(${cFL} ${cFC} ${flipCard.hue})` : 'var(--bg)'}
+            stroke={atCenter ? `oklch(${cSL} ${cSC} ${flipCard.hue})` : 'var(--border-strong)'}
             stroke-width="0.7" />
           {#each [-6, -3, 0] as ly, li}
             <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
@@ -414,7 +444,7 @@
           {#if atCenter}
             <text x="12" y="8" text-anchor="end" font-size="5.5"
               font-family="ui-monospace, Menlo, monospace"
-              fill="oklch(0.4 0.20 {flipCard.hue})">.{flipCard.ext}</text>
+              fill={`oklch(${cTL} 0.20 ${flipCard.hue})`}>.{flipCard.ext}</text>
           {/if}
         </g>
       {/if}
@@ -453,28 +483,28 @@
         {#if fly === null}
           <g transform="translate({trayX + card.offX} {trayY + card.offY}) rotate({card.tilt})">
             <rect x="-15" y="-11" width="30" height="22" rx="2"
-              fill="oklch(0.97 0.03 {card.hue})"
-              stroke="oklch(0.55 0.16 {card.hue})" stroke-width="0.7" />
+              fill={`oklch(${cFL} ${cFC} ${card.hue})`}
+              stroke={`oklch(${cSL} ${cSC} ${card.hue})`} stroke-width="0.7" />
             {#each [-6, -3, 0] as ly, li}
               <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
                 stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="0.4" />
             {/each}
             <text x="12" y="8" text-anchor="end" font-size="5.5"
               font-family="ui-monospace, Menlo, monospace"
-              fill="oklch(0.4 0.20 {card.hue})">.{card.ext}</text>
+              fill={`oklch(${cTL} 0.20 ${card.hue})`}>.{card.ext}</text>
           </g>
         {:else if fly !== 'done'}
           <g transform="translate({fly.x} {fly.y}) rotate({fly.tilt})" opacity={fly.opacity}>
             <rect x="-15" y="-11" width="30" height="22" rx="2"
-              fill="oklch(0.97 0.03 {card.hue})"
-              stroke="oklch(0.55 0.16 {card.hue})" stroke-width="0.7" />
+              fill={`oklch(${cFL} ${cFC} ${card.hue})`}
+              stroke={`oklch(${cSL} ${cSC} ${card.hue})`} stroke-width="0.7" />
             {#each [-6, -3, 0] as ly, li}
               <line x1="-11" y1={ly} x2={-11 + LINE_WIDTHS[li]} y2={ly}
                 stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="0.4" />
             {/each}
             <text x="12" y="8" text-anchor="end" font-size="5.5"
               font-family="ui-monospace, Menlo, monospace"
-              fill="oklch(0.4 0.20 {card.hue})">.{card.ext}</text>
+              fill={`oklch(${cTL} 0.20 ${card.hue})`}>.{card.ext}</text>
           </g>
         {/if}
       {/each}
@@ -485,23 +515,23 @@
       {#each displaySlots.slice(0, namedSlotCount) as slot, si}
         {@const sp = slotPos(si, namedSlotCount)}
         <rect x={sp.x} y={sp.y} width={slotW} height={slotH}
-          fill="oklch(0.97 0.04 {slot.hue})"
-          stroke="oklch(0.6 0.13 {slot.hue})"
+          fill={`oklch(${sFL} ${sFC} ${slot.hue})`}
+          stroke={`oklch(${sSL} ${sSC} ${slot.hue})`}
           stroke-width="0.6" />
         <rect x={sp.x + 1} y={sp.y + 1} width={slotW - 2} height="2.5" fill="var(--text)" fill-opacity="0.08" />
         {#each Array.from({ length: Math.min(4, Math.ceil(fills[si] / 2)) }) as _, fi}
           <rect x={sp.x + 4} y={sp.y + slotH - 4 - fi * 1.6} width={slotW - 8} height="2.5"
-            fill="var(--bg)" stroke="oklch(0.55 0.18 {slot.hue})" stroke-width="0.4" />
+            fill="var(--bg)" stroke={`oklch(${sCL} 0.18 ${slot.hue})`} stroke-width="0.4" />
         {/each}
         <text x={sp.x + 5} y={sp.y + 11} font-size="7.5"
           font-family='"Jacquard 24", serif' font-weight="600"
-          fill="oklch(0.32 0.18 {slot.hue})">
+          fill={`oklch(${stL} 0.18 ${slot.hue})`}>
           {slot.name}
         </text>
         {#if fills[si] > 0}
           <text x={sp.x + slotW - 5} y={sp.y + slotH - 4} text-anchor="end"
             font-size="9" font-family='"Jacquard 24", serif' font-weight="600"
-            fill="oklch(0.4 0.18 {slot.hue})">{fills[si]}</text>
+            fill={`oklch(${snL} 0.18 ${slot.hue})`}>{Math.min(fills[si], slot.capacity)}</text>
         {/if}
       {/each}
     {/if}

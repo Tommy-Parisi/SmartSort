@@ -87,12 +87,12 @@
 <style>
   .shell {
     display: flex;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
   }
 
   .sidebar {
-    width: 220px;
+    width: 190px;
   flex-shrink: 0;
     background: var(--bg-secondary);
     border-right: 0.5px solid var(--border);
@@ -150,8 +150,9 @@
   .sb-bottom a.active {
     background: var(--bg);
     color: var(--text);
-    font-weight: 600;
-    border-color: var(--border-strong);
+    font-weight: 500;
+    border-color: rgba(0,0,0,0.1);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
   }
 
   .sb-nav a.active svg,

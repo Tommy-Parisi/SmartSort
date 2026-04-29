@@ -7,6 +7,7 @@
   import { sortStore, resetSort } from '$lib/stores/sort';
   import { tauriGetLicenseStatus, tauriGetHistory, tauriActivateLicense, type SortSession } from '$lib/tauri';
   import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
 
   let store = $sortStore;
   $: store = $sortStore;
@@ -37,13 +38,28 @@
     } finally {
       historyLoading = false;
     }
+
+    try {
+      const unlisten = await listen('tauri://file-drop', (event: any) => {
+        const paths: string[] = event.payload.paths ?? event.payload ?? [];
+        if (paths.length > 0) handleFolderSelected(paths[0]);
+        isDragOver = false;
+      });
+      return unlisten;
+    } catch {
+      // not in Tauri environment
+    }
   });
+
+  function handleFolderSelected(path: string) {
+    sortStore.update(s => ({ ...s, selectedFolder: path }));
+  }
 
   async function pickFolder() {
     try {
       const picked = await open({ directory: true, multiple: false });
       if (picked && typeof picked === 'string') {
-        sortStore.update(s => ({ ...s, selectedFolder: picked }));
+        handleFolderSelected(picked);
       }
     } catch (e) {
       console.error(e);
@@ -63,15 +79,7 @@
   function handleDrop(e: DragEvent) {
     e.preventDefault();
     isDragOver = false;
-    const items = e.dataTransfer?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      const entry = items[i].webkitGetAsEntry?.();
-      if (entry?.isDirectory) {
-        sortStore.update(s => ({ ...s, selectedFolder: (entry as any).fullPath }));
-        break;
-      }
-    }
+    // Tauri file-drop is handled via the tauri://file-drop event listener
   }
 
   function startSort() {
@@ -112,6 +120,7 @@
 <ShellLayout>
   <div class="content">
     <p class="section-label">New sort</p>
+    <p class="value-prop">Organizes files by what is inside and important, not by type</p>
 
     <!-- Drop zone -->
     <div
@@ -137,6 +146,7 @@
       {:else}
         <p class="drop-main">Drop a folder here</p>
         <p class="drop-hint">or click to browse</p>
+        <p class="dz-hint">Try it on your Downloads folder</p>
       {/if}
     </div>
 
@@ -148,7 +158,7 @@
     <!-- Toggles -->
     <div class="toggles">
       <Toggle
-        label="Watch mode — keep this folder sorted automatically"
+        label="Watch mode: Automatically organizes new files as they arrive"
         bind:checked={$sortStore.watchMode}
       />
     </div>
@@ -161,6 +171,7 @@
     >
       Sort folder
     </button>
+    <p class="trust-line">Runs locally · Private · Nothing leaves your device</p>
 
     <!-- Recent sorts -->
     <div class="recent-section">
@@ -169,7 +180,21 @@
       {#if historyLoading}
         <p class="empty-hint">Loading…</p>
       {:else if recentSessions.length === 0}
-        <p class="empty-hint">No sorts yet. Drop a folder above to get started.</p>
+        <p class="empty-state">After your first sort, you'll see folder names, file counts, and one-click undo here.</p>
+        <div class="recent-preview">
+          <p class="preview-label">Example</p>
+          <div class="recent-list">
+            <div class="recent-row">
+              <svg class="recent-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span class="recent-folder">Downloads</span>
+              <span class="recent-date">Just now</span>
+              <span class="recent-stats">73 files</span>
+              <span class="recent-badge">12 folders</span>
+            </div>
+          </div>
+        </div>
       {:else}
         <div class="recent-list">
           {#each recentSessions as session}
@@ -231,11 +256,16 @@
 
   .section-label {
     margin: 0 0 4px;
-    font-size: 10px;
+    font-size: 16px;
     font-weight: 600;
     color: var(--text-secondary);
-    text-transform: uppercase;
     letter-spacing: 0.06em;
+  }
+
+  .value-prop {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
   }
 
   /* Drop zone */
@@ -253,10 +283,14 @@
     transition: border-color 0.15s, background 0.15s;
   }
 
-  .dropzone:hover,
-  .dropzone.drag-over {
+  .dropzone:hover {
     border-color: var(--text-secondary);
     background: var(--bg-secondary);
+  }
+
+  .dropzone.drag-over {
+    border-color: #1D9E75;
+    background: #F7FDF9;
   }
 
   .dropzone.selected {
@@ -296,6 +330,19 @@
     color: var(--text-secondary);
   }
 
+  .dz-hint {
+    margin: 10px 0 0;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+
+  .trust-line {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+
   /* Toggles */
   .toggles {
     border: 1px solid var(--border-strong);
@@ -312,12 +359,12 @@
   /* Buttons */
   .btn-primary {
     width: 100%;
-    padding: 11px;
+    padding: 13px;
     background: var(--text);
     color: var(--bg);
     border: none;
-    border-radius: 6px;
-    font-size: 13px;
+    border-radius: 8px;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: opacity 0.15s;
@@ -343,6 +390,26 @@
     font-size: 12px;
     color: var(--text-secondary);
     padding: 8px 0;
+  }
+
+  .empty-state {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-faint);
+    line-height: 1.6;
+    padding: 4px 0;
+  }
+
+  .recent-preview {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .preview-label {
+    margin: 0 0 6px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
   }
 
   .recent-list {

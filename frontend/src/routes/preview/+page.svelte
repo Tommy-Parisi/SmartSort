@@ -78,6 +78,7 @@
   let draggedFolder:    PreviewFolder | null = null;
   let dragOverFolderId: number | null = null;
   let dragOverUnsorted  = false;
+  let dragOverUnsortedIndex: number | null = null;
   let dragCandidate:
     | { kind: 'file'; file: PreviewFile; pointerId: number; startX: number; startY: number }
     | { kind: 'folder'; folder: PreviewFolder; pointerId: number; startX: number; startY: number }
@@ -93,6 +94,8 @@
   type UnsortedSortMode = 'default' | 'alpha-asc' | 'alpha-desc' | 'by-type';
   let unsortedSortMode: UnsortedSortMode = 'default';
   let unsortedCollapsed = true;
+  let panelWidth = 260;
+  let isResizing = false;
   let _prevUnsortedLen = 0;
   // Auto-expand whenever a file enters the unsorted panel
   $: {
@@ -362,7 +365,7 @@
   }
 
   function moveFileToUnsorted(file: PreviewFile) {
-    if (file.currentClusterId === null) return; // already unsorted
+    if (file.currentClusterId === null && !trashedFiles.some(f => f.filename === file.filename)) return;
     removeFromSource(file);
     unsortedFiles = [...unsortedFiles, { ...file, currentClusterId: null }];
   }
@@ -435,30 +438,6 @@
     collapsedTypes = new Set(collapsedTypes);
   }
 
-  function moveUnsortedUp(file: PreviewFile) {
-    if (unsortedSortMode !== 'default' || unsortedSearch) return;
-    const unpinned = unsortedFiles.filter(f => !pinnedFilenames.has(f.filename));
-    const idx = unpinned.findIndex(f => f.filename === file.filename);
-    if (idx <= 0) return;
-    const arr = [...unsortedFiles];
-    const aIdx = arr.findIndex(f => f.filename === unpinned[idx].filename);
-    const bIdx = arr.findIndex(f => f.filename === unpinned[idx - 1].filename);
-    [arr[aIdx], arr[bIdx]] = [arr[bIdx], arr[aIdx]];
-    unsortedFiles = arr;
-  }
-
-  function moveUnsortedDown(file: PreviewFile) {
-    if (unsortedSortMode !== 'default' || unsortedSearch) return;
-    const unpinned = unsortedFiles.filter(f => !pinnedFilenames.has(f.filename));
-    const idx = unpinned.findIndex(f => f.filename === file.filename);
-    if (idx < 0 || idx >= unpinned.length - 1) return;
-    const arr = [...unsortedFiles];
-    const aIdx = arr.findIndex(f => f.filename === unpinned[idx].filename);
-    const bIdx = arr.findIndex(f => f.filename === unpinned[idx + 1].filename);
-    [arr[aIdx], arr[bIdx]] = [arr[bIdx], arr[aIdx]];
-    unsortedFiles = arr;
-  }
-
   // ── Pointer drag: source ─────────────────────────────────────────────────
   function onFilePointerDown(e: PointerEvent, file: PreviewFile) {
     if (e.button !== 0) return;
@@ -492,6 +471,7 @@
   }
 
   function handlePointerMove(e: PointerEvent) {
+    if (isResizing) return;
     if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
 
     // Prevent browser text-selection default for every move while a drag candidate
@@ -519,6 +499,7 @@
   }
 
   function handlePointerUp(e: PointerEvent) {
+    if (isResizing) return;
     if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
 
     if (isPointerDragging && draggedFile) {
@@ -530,9 +511,29 @@
         snapshotState(`Move ${draggedFile.filename}`);
         moveFileTo(draggedFile, dragOverFolderId);
         flashCard(dragOverFolderId);
-      } else if (dragOverUnsorted && draggedFile.currentClusterId !== null) {
-        snapshotState(`Move ${draggedFile.filename}`);
-        moveFileToUnsorted(draggedFile);
+      } else if (dragOverUnsorted) {
+        const df = draggedFile!;
+        const isFromTrash = trashedFiles.some(f => f.filename === df.filename);
+        const isFromFolder = df.currentClusterId !== null;
+        if (isFromFolder || isFromTrash) {
+          snapshotState(`Move ${df.filename}`);
+          moveFileToUnsorted(df);
+        } else if (dragOverUnsortedIndex !== null && unsortedSortMode === 'default' && !unsortedSearch) {
+          // Reorder within unsorted list
+          const unpinned = unsortedFiles.filter(f => !pinnedFilenames.has(f.filename));
+          const fromIdx = unpinned.findIndex(f => f.filename === df.filename);
+          if (fromIdx !== -1) {
+            const insertIdx = dragOverUnsortedIndex > fromIdx ? dragOverUnsortedIndex - 1 : dragOverUnsortedIndex;
+            if (insertIdx !== fromIdx) {
+              snapshotState(`Reorder ${df.filename}`);
+              const newUnpinned = [...unpinned];
+              newUnpinned.splice(fromIdx, 1);
+              newUnpinned.splice(insertIdx, 0, df);
+              const pinned = unsortedFiles.filter(f => pinnedFilenames.has(f.filename));
+              unsortedFiles = [...pinned, ...newUnpinned];
+            }
+          }
+        }
       }
     } else if (isPointerDragging && draggedFolder) {
       if (dragOverTrash) {
@@ -557,9 +558,10 @@
   }
 
   function updatePointerDropTarget(x: number, y: number) {
-    dragOverFolderId = null;
-    dragOverUnsorted = false;
-    dragOverTrash    = false;
+    dragOverFolderId     = null;
+    dragOverUnsorted     = false;
+    dragOverUnsortedIndex = null;
+    dragOverTrash        = false;
     if (!draggedFile && !draggedFolder) return;
 
     const hovered = document.elementFromPoint(x, y) as HTMLElement | null;
@@ -580,20 +582,29 @@
 
     if (draggedFile) {
       const unsortedTarget = hovered?.closest<HTMLElement>('[data-unsorted-drop]');
-      if (unsortedTarget && draggedFile.currentClusterId !== null) {
+      const isFromTrash = trashedFiles.some(f => f.filename === draggedFile!.filename);
+      if (unsortedTarget && (draggedFile.currentClusterId !== null || isFromTrash)) {
         dragOverUnsorted = true;
+        // Determine insert index for reorder
+        const rowEl = hovered?.closest<HTMLElement>('[data-unsorted-index]');
+        if (rowEl?.dataset.unsortedIndex !== undefined) {
+          const idx = parseInt(rowEl.dataset.unsortedIndex);
+          const rect = rowEl.getBoundingClientRect();
+          dragOverUnsortedIndex = y < rect.top + rect.height / 2 ? idx : idx + 1;
+        }
       }
     }
   }
 
   function clearPointerDrag() {
-    dragCandidate    = null;
-    draggedFile      = null;
-    draggedFolder    = null;
-    dragOverFolderId = null;
-    dragOverUnsorted = false;
-    dragOverTrash    = false;
-    isPointerDragging = false;
+    dragCandidate         = null;
+    draggedFile           = null;
+    draggedFolder         = null;
+    dragOverFolderId      = null;
+    dragOverUnsorted      = false;
+    dragOverUnsortedIndex = null;
+    dragOverTrash         = false;
+    isPointerDragging     = false;
     document.body.classList.remove('dragging');
   }
 
@@ -689,6 +700,7 @@
     <div
       class="left-panel"
       class:is-collapsed={unsortedCollapsed}
+      style={!unsortedCollapsed ? `width: ${panelWidth}px` : ''}
       data-unsorted-drop="true"
       class:drag-over={dragOverUnsorted}
     >
@@ -708,7 +720,7 @@
           <span class="collapsed-label">unsorted</span>
         </button>
 
-      {:else}
+      {:else}<!-- expanded -->
         <!-- Expanded: full panel -->
         <div class="unsorted-header">
           <span class="unsorted-title">unsorted · {unsortedFiles.length} files</span>
@@ -801,14 +813,13 @@
             <!-- Default / alpha sorted view -->
             {:else}
               {#each sortedUnpinned as file, i (file.filename)}
+                {#if dragOverUnsortedIndex === i && draggedFile && draggedFile.filename !== file.filename}
+                  <div class="drop-indicator"></div>
+                {/if}
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div class="file-row" class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
+                <div class="file-row" data-unsorted-index={i} class:pointer-dragging={draggedFile?.filename === file.filename} on:pointerdown={e => onFilePointerDown(e, file)}>
                   <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-                  <span class="file-name">{trunc(file.filename, 17)}</span>
-                  {#if unsortedSortMode === 'default' && !unsortedSearch}
-                    <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedUp(file)}   disabled={i === 0}                         title="Move up">↑</button>
-                    <button class="order-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => moveUnsortedDown(file)} disabled={i === sortedUnpinned.length - 1} title="Move down">↓</button>
-                  {/if}
+                  <span class="file-name">{trunc(file.filename, 19)}</span>
                   <button class="pin-btn" type="button" on:pointerdown|stopPropagation on:click|stopPropagation={() => togglePin(file.filename)} title="Pin to top"><svg class="pin-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="4.5" r="3"/><path d="M5.5 6.5 L10.5 6.5 L8 11 Z"/><rect x="7.35" y="11" width="1.3" height="4" rx="0.65"/></svg></button>
                   {#if openUnsortedMoveFile === file.filename}
                     <select class="move-select" on:pointerdown|stopPropagation on:change={e => moveUnsortedFile(file.filename, (e.target as HTMLSelectElement).value)} on:blur={() => (openUnsortedMoveFile = null)}>
@@ -820,6 +831,9 @@
                   {/if}
                 </div>
               {/each}
+              {#if dragOverUnsortedIndex === sortedUnpinned.length && draggedFile}
+                <div class="drop-indicator"></div>
+              {/if}
             {/if}
 
           {/if}
@@ -833,51 +847,79 @@
           </div>
         {/if}
 
-        <!-- Trash zone -->
+      {/if}<!-- end expanded -->
+
+      <!-- Resize handle (visible when expanded) -->
+      {#if !unsortedCollapsed}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="trash-zone"
-          data-trash-drop="true"
-          class:drag-over={dragOverTrash}
+          class="resize-handle"
+          on:pointerdown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            isResizing = true;
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          }}
+          on:pointermove={e => {
+            if (!isResizing) return;
+            e.preventDefault();
+            panelWidth = Math.max(160, Math.min(520, e.clientX));
+          }}
+          on:pointerup={() => { isResizing = false; }}
+          on:pointercancel={() => { isResizing = false; }}
+        ></div>
+      {/if}
+
+      <!-- Trash zone — always visible, even when unsorted panel is collapsed -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="trash-zone"
+        data-trash-drop="true"
+        class:drag-over={dragOverTrash}
+        class:is-collapsed={unsortedCollapsed}
+      >
+        <button
+          class="trash-header"
+          type="button"
+          on:click={() => trashExpanded = !trashExpanded}
+          on:pointerdown|stopPropagation
         >
-          <button
-            class="trash-header"
-            type="button"
-            on:click={() => trashExpanded = !trashExpanded}
-          >
-            <span class="trash-icon">🗑</span>
-            <span>Trash · {trashedFiles.length} {trashedFiles.length === 1 ? 'file' : 'files'}</span>
-            <span class="trash-chevron" class:open={trashExpanded}>^</span>
-          </button>
-          {#if trashExpanded && trashedFiles.length > 0}
-            <div class="trash-files">
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              {#each trashedFiles as file (file.filename)}
-                <div
-                  class="file-row trash-file-row"
-                  class:pointer-dragging={draggedFile?.filename === file.filename}
-                  on:pointerdown={e => onFilePointerDown(e, file)}
-                >
-                  <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
-                  <span class="file-name">{trunc(file.filename, 20)}</span>
-                  <button
-                    class="restore-btn"
-                    type="button"
-                    on:pointerdown|stopPropagation
-                    on:click={() => restoreFromTrash(file)}
-                    title="Restore to unsorted"
-                  >↩</button>
-                </div>
-              {/each}
-            </div>
-          {/if}
-          {#if trashExpanded && trashedFiles.length === 0}
-            <p class="empty-state" style="padding:10px 14px;font-size:11px;">
-              {dragOverTrash ? 'Drop to delete on confirm' : 'No files in trash'}
-            </p>
-          {/if}
-        </div>
-      {/if}<!-- end expanded -->
+          <svg class="trash-icon-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
+            <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
+          <span class="trash-label">Trash · {trashedFiles.length} {trashedFiles.length === 1 ? 'file' : 'files'}</span>
+          <span class="trash-chevron" class:open={trashExpanded}>^</span>
+        </button>
+        {#if trashExpanded && trashedFiles.length > 0}
+          <div class="trash-files">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            {#each trashedFiles as file (file.filename)}
+              <div
+                class="file-row trash-file-row"
+                class:pointer-dragging={draggedFile?.filename === file.filename}
+                on:pointerdown={e => onFilePointerDown(e, file)}
+              >
+                <span class="ext-badge" style={extStyle(file.ext)}>{file.ext || '?'}</span>
+                <span class="file-name">{trunc(file.filename, 20)}</span>
+                <button
+                  class="restore-btn"
+                  type="button"
+                  on:pointerdown|stopPropagation
+                  on:click={() => restoreFromTrash(file)}
+                  title="Restore to unsorted"
+                >↩</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if trashExpanded && trashedFiles.length === 0}
+          <p class="empty-state" style="padding:10px 14px;font-size:11px;">
+            {dragOverTrash ? 'Drop to delete on confirm' : 'No files in trash'}
+          </p>
+        {/if}
+      </div>
 
     </div>
 
@@ -921,7 +963,7 @@
 
       <div class="panel-scroll">
         <div class="drag-help">
-          Drag files or folders to reorganize. Drag to 🗑 to permanently delete on confirm.
+          Drag files or folders to reorganize. Drag to trash to permanently delete on confirm.
         </div>
         <div class="cards-grid" class:has-expanded={expandedCardIds.size > 0}>
 
@@ -1016,7 +1058,7 @@
                           on:pointerdown|stopPropagation
                           on:click|stopPropagation={() => trashFileFromCard(file, folder.cluster_id)}
                           title="Delete on confirm"
-                        >🗑</button>
+                        ><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
                       </div>
                     {/each}
                     {#if folder.files.length === 0}
@@ -1129,22 +1171,45 @@
     overflow-y: auto;
     min-height: 0;
   }
+  .panel-scroll::-webkit-scrollbar { width: 3px; }
+  .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+  .panel-scroll:hover::-webkit-scrollbar { width: 8px; }
+  .panel-scroll:hover::-webkit-scrollbar-thumb { border-radius: 4px; }
 
   /* ── Left panel ── */
   .left-panel {
-    width: 260px;
+    width: 260px; /* overridden by inline style when expanded */
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     border-right: 0.5px solid var(--border);
     background: var(--bg);
     overflow: hidden;
-    transition: width 180ms ease, background 100ms;
+    transition: background 100ms;
     position: relative;
   }
 
   .left-panel.is-collapsed {
-    width: 28px;
+    width: 28px !important;
+    transition: width 180ms ease, background 100ms;
+  }
+
+  /* ── Resize handle ── */
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 120ms;
+  }
+  .resize-handle:hover {
+    background: var(--accent);
+    opacity: 0.35;
   }
 
   /* ── Collapsed strip (the thin clickable tab) ── */
@@ -1418,22 +1483,6 @@
   .type-group-header:hover { background: var(--bg-secondary); color: var(--text); }
   .type-group-label { flex: 1; }
 
-  /* Up/down order buttons */
-  .order-btn {
-    opacity: 0;
-    transition: opacity 100ms;
-    font-size: 11px;
-    color: var(--text-secondary);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 1px 2px;
-    flex-shrink: 0;
-    line-height: 1;
-  }
-  .file-row:hover .order-btn { opacity: 1; }
-  .order-btn:disabled { opacity: 0.18 !important; cursor: not-allowed; }
-
   /* ── Ext badge ── */
   .ext-badge {
     font-size: 10px;
@@ -1539,6 +1588,7 @@
     flex-shrink: 0;
     background: rgba(192, 57, 43, 0.04);
     transition: background 100ms, border-color 100ms;
+    overflow: hidden;
   }
   .trash-zone.drag-over {
     background: rgba(192, 57, 43, 0.12);
@@ -1561,20 +1611,50 @@
     color: var(--error);
     text-align: left;
     opacity: 0.7;
+    white-space: nowrap;
   }
   .trash-header:hover { opacity: 1; }
   .trash-zone.drag-over .trash-header { opacity: 1; }
 
-  .trash-icon { font-size: 13px; }
+  .trash-icon-svg {
+    flex-shrink: 0;
+    color: var(--error);
+  }
+
+  .trash-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* When collapsed, trash shows only the icon */
+  .trash-zone.is-collapsed .trash-label,
+  .trash-zone.is-collapsed .trash-chevron,
+  .trash-zone.is-collapsed .trash-files,
+  .trash-zone.is-collapsed .empty-state { display: none; }
+  .trash-zone.is-collapsed .trash-header {
+    padding: 8px;
+    justify-content: center;
+  }
 
   .trash-chevron {
     margin-left: auto;
+    flex-shrink: 0;
     display: inline-block;
     font-size: 9px;
     transition: transform 150ms;
     transform: rotate(180deg);
   }
   .trash-chevron.open { transform: rotate(0deg); }
+
+  /* ── Drop indicator (reorder in unsorted list) ── */
+  .drop-indicator {
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+    margin: 1px 8px;
+    pointer-events: none;
+  }
 
   .trash-files {
     padding: 0 0 6px;
@@ -1889,15 +1969,16 @@
   .card-file-trash {
     background: none;
     border: none;
-    font-size: 10px;
     cursor: pointer;
     padding: 1px 2px;
     opacity: 0;
     transition: opacity 100ms;
     flex-shrink: 0;
-    filter: grayscale(1);
+    color: var(--error);
+    display: flex;
+    align-items: center;
   }
-  .card-file-row:hover .card-file-trash { opacity: 0.7; filter: grayscale(0); }
+  .card-file-row:hover .card-file-trash { opacity: 0.55; }
   .card-file-trash:hover { opacity: 1 !important; }
 
   .card-empty {

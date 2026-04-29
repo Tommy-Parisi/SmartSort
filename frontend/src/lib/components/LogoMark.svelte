@@ -38,32 +38,33 @@
   .logo-mark {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 2px;
     color: var(--text);
   }
 
   .mark-icon {
-    width: 32px;
-    height: 32px;
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
   }
 
   .wordmark {
-    font-family: 'Jacquard24', serif;
-    font-size: 30px;
-    font-weight: normal;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 24px;
+    font-weight: 700;
     color: var(--text);
     line-height: 1;
     white-space: nowrap;
-    letter-spacing: 0.01em;
+    letter-spacing: -0.02em;
+    transform: translateY(-3px);
   }
 
   .compact .mark-icon {
-    width: 22px;
-    height: 22px;
+    width: 16px;
+    height: 16px;
   }
 
   .compact .wordmark {
-    font-size: 26px;
+    font-size: 13px;
   }
 </style>

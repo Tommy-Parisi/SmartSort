@@ -31,9 +31,6 @@
 
   let currentStage   = 'extracting';
   let foldersFound   = 0;
-  let extractedCount = 0;
-  let placedCount    = 0;
-  let actualTotal    = 0;
   let estETA         = '–';
 
   let sortRunning = false;
@@ -63,7 +60,9 @@
     maxProgressPct = progressPct;
   }
 
-  $: foldersFound = store.foldersDiscovered.length;
+  $: foldersFound    = store.foldersDiscovered.length;
+  $: displayTotal    = store.filesTotal > 0 ? Math.round(store.filesTotal / 100) : 0;
+  $: displayProgress = displayTotal > 0 ? Math.min(Math.round(store.filesProcessed / 100), displayTotal) : 0;
 
   // Step 1 = Analyzing (extracting/embedding), Step 2 = Sorting (clustering/naming/placing)
   $: flowStep = (currentStage === 'extracting' || currentStage === 'embedding') ? 1 : 2;
@@ -99,9 +98,6 @@
 
       const now = Date.now();
       if (!sortStartTs) sortStartTs = now;
-      if (!actualTotal && e.files_total > 0) actualTotal = Math.round(e.files_total / 100);
-      if (e.stage === 'extracting') extractedCount++;
-      if (e.stage === 'placing')    placedCount++;
       if (e.stage === 'extracting' || e.stage === 'embedding') {
         const frac = e.files_processed / e.files_total;
         if (frac > 0.04) {
@@ -199,11 +195,13 @@
           <span>{foldersFound} folders found</span>
           <span class="dot">·</span>
         {/if}
-        <span>
-          {currentStage === 'placing' ? placedCount : extractedCount} of {actualTotal}
-          {currentStage === 'placing' ? 'files sorted' : 'files processed'}
-        </span>
-        <span class="dot">·</span>
+        {#if displayTotal > 0}
+          <span>
+            {displayProgress} of {displayTotal}
+            {currentStage === 'placing' ? 'files placed' : 'files processed'}
+          </span>
+          <span class="dot">·</span>
+        {/if}
         <span>{estETA}</span>
       </div>
     {/if}
