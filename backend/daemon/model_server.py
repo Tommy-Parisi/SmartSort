@@ -2,8 +2,9 @@
 Lightweight local HTTP model server — loads sentence-transformers once,
 serves embeddings to any local process.
 
-GET  /health  →  {"status": "ok", "model": "<name>"}
-POST /embed   →  {"text": "..."}  →  {"embedding": [...]}
+GET  /health       →  {"status": "ok", "model": "<name>"}
+POST /embed        →  {"text": "..."}          →  {"embedding": [...]}
+POST /embed_batch  →  {"texts": ["...", ...]}  →  {"embeddings": [[...], ...]}
 
 Start from daemon_runner.py before watchdog so the pipeline subprocess
 can share model weights via localhost instead of loading a second copy.
@@ -34,6 +35,23 @@ class _EmbedHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/embed_batch":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body)
+                texts = [str(t) for t in payload.get("texts", [])]
+            except Exception:
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+            try:
+                with self.server.lock:
+                    vecs = self.server.model.encode(texts, convert_to_numpy=True)
+                self._send_json(200, {"embeddings": vecs.tolist()})
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+            return
+
         if self.path != "/embed":
             self._send_json(404, {"error": "not found"})
             return

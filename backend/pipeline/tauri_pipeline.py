@@ -7,8 +7,9 @@ import sys
 import os
 import json
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 from collections import defaultdict
 
 # Add the backend directory to Python path for relative imports
@@ -30,11 +31,8 @@ from backend.agents.folder_naming_agent import FolderNamingAgent
 from backend.agents.file_relocation_agent import FileRelocationAgent
 from backend.core.models import FileContent, ClusteredFile
 from backend.core.license import check_file_limit, activate, license_status
-from dotenv import load_dotenv
-from datetime import datetime
 import random
 
-load_dotenv()
 
 
 def _stratified_sample(file_metas, max_files: int, seed: int = 42):
@@ -218,22 +216,21 @@ class TauriPipeline:
 
             self.results["files_processed"] = len(ingestor.file_meta_queue)
 
-            # 2. Extraction
+            # 2. Extraction — parallel with 4 workers (OCR is I/O + subprocess bound)
             self.log_progress(2, "Extracting content from files...", 20)
             router = ExtractorRouter()
-            extracted = []
-            
-            for i, fmeta in enumerate(ingestor.file_meta_queue):
-                content: FileContent = router.route(fmeta)
-                extracted.append(content)
-                
-                # Update progress during extraction
-                progress = 20 + (i / len(ingestor.file_meta_queue)) * 20
-                self.log_progress(2, f"Extracting: {fmeta.file_name}", int(progress))
-            
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futs = [pool.submit(router.route, fmeta) for fmeta in ingestor.file_meta_queue]
+                extracted = []
+                for i, fut in enumerate(futs):
+                    content: FileContent = fut.result()
+                    extracted.append(content)
+                    progress = 20 + (i / len(futs)) * 20
+                    self.log_progress(2, f"Extracting: {ingestor.file_meta_queue[i].file_name}", int(progress))
+
             success_count = sum(1 for f in extracted if f.status == "success")
             fail_count = len(extracted) - success_count
-            
+
             if success_count == 0:
                 self.results.update({
                     "status": "error",
@@ -241,18 +238,12 @@ class TauriPipeline:
                     "errors": [f"Failed to extract content from {fail_count} files"]
                 })
                 return self.results
-            
-            # 3. Embedding
+
+            # 3. Embedding — single batch call
             self.log_progress(3, "Creating semantic embeddings...", 40)
             embedder = EmbeddingAgent()
-            embedded = []
-            
-            for i, extracted_file in enumerate(extracted):
-                embedded_file = embedder.embed(extracted_file)
-                embedded.append(embedded_file)
-                
-                progress = 40 + (i / len(extracted)) * 20
-                self.log_progress(3, f"Embedding: {extracted_file.file_meta.file_name}", int(progress))
+            embedded = embedder.embed_many(extracted)
+            self.log_progress(3, f"Embedded {len(embedded)} files", 60)
             
             embedded_count = len([e for e in embedded if e.status == "embedded"])
             photo_embedded      = [e for e in embedded if e.status == "photo"]
@@ -422,31 +413,33 @@ class TauriPipeline:
             files_total = num_files * (W_EXT + W_EMB + W_NAM + W_PLC)
             current_processed = 0
 
-            # 2. Extraction — 40% of bar
+            # 2. Extraction — parallel with 4 workers; emit events before submit so the
+            #    mailroom animation stays lively while OCR runs in the background.
             router = ExtractorRouter()
-            extracted = []
-            for i, fmeta in enumerate(ingestor.file_meta_queue):
-                current_processed += W_EXT
-                self._emit("file-assigned", {
-                    "filename": fmeta.file_name,
-                    "cluster_id": -1,
-                    "folder_name": "",
-                    "files_processed": current_processed,
-                    "files_total": files_total,
-                    "stage": "extracting",
-                })
-                content: FileContent = router.route(fmeta)
-                extracted.append(content)
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futs = []
+                for fmeta in ingestor.file_meta_queue:
+                    current_processed += W_EXT
+                    self._emit("file-assigned", {
+                        "filename": fmeta.file_name,
+                        "cluster_id": -1,
+                        "folder_name": "",
+                        "files_processed": current_processed,
+                        "files_total": files_total,
+                        "stage": "extracting",
+                    })
+                    futs.append(pool.submit(router.route, fmeta))
+                extracted = [f.result() for f in futs]
 
             success_count = sum(1 for f in extracted if f.status == "success")
             if success_count == 0:
                 self._emit("sort-error", {"message": "No files could be extracted."})
                 return
 
-            # 3. Embedding — 40% of bar (Total so far: 80%)
+            # 3. Embedding — single batch call, then emit per-file events
             embedder = EmbeddingAgent()
-            embedded = []
-            for i, extracted_file in enumerate(extracted):
+            embedded = embedder.embed_many(extracted)
+            for extracted_file in extracted:
                 current_processed += W_EMB
                 self._emit("file-assigned", {
                     "filename": extracted_file.file_meta.file_name,
@@ -456,8 +449,6 @@ class TauriPipeline:
                     "files_total": files_total,
                     "stage": "embedding",
                 })
-                embedded_file = embedder.embed(extracted_file)
-                embedded.append(embedded_file)
 
             embedded_count      = len([e for e in embedded if e.status == "embedded"])
             photo_embedded      = [e for e in embedded if e.status == "photo"]
