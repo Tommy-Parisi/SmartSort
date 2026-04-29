@@ -3,7 +3,6 @@ import re
 import json
 import math
 import hashlib
-import sys
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
 
@@ -38,15 +37,12 @@ ALWAYS_STRIP = {
     "img", "image", "images", "photo", "scanned", "scan", "screenshot",
     "jpeg", "jpg", "png", "heic", "gif", "svg", "webp",
     "series",
+    # Camera-roll and device prefixes — never meaningful folder-name words
+    "dsc", "dscn", "dcim", "pic", "pxl", "cam", "mvimg", "pano",
+    "vlcsnap", "burst", "live", "vid", "clip", "received", "capture",
+    "snapshot", "signal",
 }
 
-# Stems that carry no semantic meaning — camera rolls, phone defaults, pure numbers
-_NONSEMANTIC_STEM_RE = re.compile(
-    r'^(?:img|dsc|dscn|dcim|pic|pxl|cam|wp|vlcsnap|signal|received|capture|'
-    r'snapshot|photo|screen.?shot|screenshot|image|screenshot)[_\-\s]?\d*$'
-    r'|\d+(\s*\(\d+\))?$',
-    re.IGNORECASE,
-)
 
 EXTENSION_LABELS = {
     "pdf": "documents",
@@ -70,6 +66,12 @@ EXTENSION_LABELS = {
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[''][A-Za-z0-9]+)?")
 NUM_RE = re.compile(r"^\d+$")
+# Structural tokens followed by a number (page3, side1, slide2, fig4, ch3, sec2, vol1, step5)
+# — these describe position in a series, not content, and make terrible folder names.
+_STRUCTURAL_NUM_RE = re.compile(
+    r'^(page|pg|side|part|sheet|slide|fig|figure|ch|chapter|sec|section|vol|step)\d+$',
+    re.IGNORECASE,
+)
 
 
 # ── Text helpers ──────────────────────────────────────────────────────────────
@@ -115,6 +117,8 @@ def _tokens(text: str) -> List[str]:
             continue
         if len(w) <= 2:
             continue
+        if _STRUCTURAL_NUM_RE.match(w):
+            continue
         toks.append(w)
     return toks
 
@@ -151,18 +155,23 @@ def _strip_label_noise(words: List[str], filenames: List[str]) -> List[str]:
     return cleaned
 
 
+def _image_filename_has_useful_tokens(file_name: str) -> bool:
+    """True if the filename would contribute at least one useful token to the naming pipeline."""
+    stem = clean_filename(os.path.splitext(file_name)[0])
+    stem_normalized = re.sub(r"[_\-.]", " ", stem)
+    return any(w not in ALWAYS_STRIP for w in _tokens(stem_normalized))
+
+
 def _is_all_images_no_semantic_names(files: List[ClusteredFile]) -> bool:
-    """True when every file is an image with a non-semantic filename (camera roll, numeric, etc.)."""
+    """True when every file is an image whose filename contributes no useful naming tokens.
+    Uses the same token filter as the naming pipeline so the two are guaranteed consistent."""
     if not files:
         return False
-    for f in files:
-        if f.file_meta.detected_type != "image":
-            return False
-        stem = os.path.splitext(f.file_meta.file_name)[0]
-        stem_clean = re.sub(r"[_\-\s]+", "", stem)
-        if not _NONSEMANTIC_STEM_RE.match(stem_clean):
-            return False
-    return True
+    return all(
+        f.file_meta.detected_type == "image"
+        and not _image_filename_has_useful_tokens(f.file_meta.file_name)
+        for f in files
+    )
 
 
 def _dominant_extension(files: List[ClusteredFile]) -> str:
@@ -268,18 +277,35 @@ def _common_prefix_label(files: List[ClusteredFile]) -> str:
 
 
 def _filename_fallback(files: List[ClusteredFile]) -> str:
-    """Last-resort: most distinctive token(s) across all filenames in the cluster."""
+    """Last-resort: most distinctive token(s) across all filenames in the cluster.
+
+    Prefers tokens that appear in ≥2 filenames (shared signal) over unique tokens.
+    When only one shared token survives, appends the dominant file-type label so the
+    folder name stays descriptive ("Egypt Images" vs a bare "Egypt").
+    """
     all_tokens: List[str] = []
     filenames = [_clean_filename_stem(f.file_meta.file_name) for f in files]
+    token_file_count: Dict[str, int] = defaultdict(int)
     for f in files:
         stem = _clean_filename_stem(f.file_meta.file_name)
-        all_tokens.extend(_tokens(stem))
+        seen_in_file: set = set()
+        for tok in _tokens(stem):
+            all_tokens.append(tok)
+            if tok not in seen_in_file:
+                token_file_count[tok] += 1
+                seen_in_file.add(tok)
     if not all_tokens:
         return ""
-    top = [
-        w for w, _ in Counter(all_tokens).most_common(5)
-        if w not in _TOO_GENERIC and w not in ALWAYS_STRIP and len(w) > 2
-    ]
+
+    def _candidate_words(min_files: int) -> List[str]:
+        return [
+            w for w, _ in Counter(all_tokens).most_common(5)
+            if token_file_count[w] >= min_files
+            and w not in _TOO_GENERIC and w not in ALWAYS_STRIP and len(w) > 2
+        ]
+
+    # Try tokens shared across ≥2 files first; fall back to unique tokens
+    top = _candidate_words(2) or _candidate_words(1)
     filtered = _strip_label_noise(top[:2], filenames)
     if len(filtered) >= 2:
         return _sanitize_label(" ".join(filtered[:2]))
@@ -291,30 +317,10 @@ def _filename_fallback(files: List[ClusteredFile]) -> str:
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 class FolderNamingAgent:
-    """
-    TF-IDF-first folder naming, filename-token fallback, optional LLM last resort.
+    """TF-IDF folder naming with filename-token fallback. Fully local, no external calls."""
 
-    By default runs entirely offline (use_llm_fallback=False).
-    Pass use_llm_fallback=True and set OPENAI_API_KEY to enable LLM top-up.
-    """
-
-    def __init__(self, model: str = "gpt-4o-mini", max_examples: int = 5,
-                 use_llm_fallback: bool = False):
-        self.model = model
+    def __init__(self, max_examples: int = 5):
         self.max_examples = max_examples
-        self.use_llm_fallback = use_llm_fallback
-        self.client = None
-
-        if use_llm_fallback:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
-                from openai import OpenAI
-                self.client = OpenAI(api_key=api_key)
-            else:
-                print("[FolderNamingAgent] OPENAI_API_KEY not set — LLM fallback disabled.",
-                      file=sys.stderr)
-                self.use_llm_fallback = False
-
         try:
             with open(CACHE_PATH) as f:
                 self.prompt_cache = json.load(f)
@@ -329,9 +335,16 @@ class FolderNamingAgent:
                 continue
 
             examples = files[: self.max_examples]
-            cache_key = self._cache_key(examples)
 
             try:
+                # Guard must run before cache: a stale cache entry for the same OCR
+                # text would otherwise bypass this check and serve a garbage name.
+                if _is_all_images_no_semantic_names(files):
+                    labels[cluster_id] = "Images"
+                    continue
+
+                cache_key = self._cache_key(examples)
+
                 if cache_key in self.prompt_cache:
                     label = self.prompt_cache[cache_key]
                 else:
@@ -339,11 +352,8 @@ class FolderNamingAgent:
                         len((f.raw_text or "").split()) for f in files
                     ) / max(len(files), 1)
 
-                    # 0. All-image clusters with non-semantic filenames: don't hallucinate
-                    if _is_all_images_no_semantic_names(files):
-                        label = "Images"
                     # 1. Short numeric-series clusters: common filename prefix wins
-                    elif avg_tokens < 10:
+                    if avg_tokens < 10:
                         label = _common_prefix_label(files)
                     else:
                         label = ""
@@ -363,17 +373,6 @@ class FolderNamingAgent:
                             file=sys.stderr,
                         )
                         label = _filename_fallback(files)
-
-                    # 3. LLM last resort (optional, requires API key)
-                    if not label and self.use_llm_fallback and self.client:
-                        prompt = self._build_llm_prompt(examples)
-                        resp = self.client.chat.completions.create(
-                            model=self.model,
-                            messages=[{"role": "user", "content": prompt}],
-                            temperature=0.2,
-                        )
-                        llm_label = (resp.choices[0].message.content or "").strip().strip('"')
-                        label = _sanitize_label(llm_label)
 
                     label = _sanitize_label(label) or f"Cluster {cluster_id}"
                     self.prompt_cache[cache_key] = label
@@ -399,21 +398,3 @@ class FolderNamingAgent:
         key = json.dumps(blobs, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(key.encode()).hexdigest()
 
-    def _build_llm_prompt(self, examples: List[ClusteredFile]) -> str:
-        def short(s: str, n: int) -> str:
-            return re.sub(r"\s+", " ", s)[:n].strip()
-        numbered = []
-        for i, f in enumerate(examples, 1):
-            meta, body = _extract_text_fields(f)
-            snippet = (meta + " — " + body) if meta else body
-            numbered.append(f'{i}. "{short(snippet, 300)}"')
-        return (
-            "You are a semantic clustering assistant.\n\n"
-            f"Below are {len(examples)} example files from the same group. "
-            "Assign a short, descriptive folder name (1–4 words) that represents "
-            "the shared topic across them all.\n\n"
-            "Examples:\n"
-            + "\n".join(numbered)
-            + "\n\nRespond with only the folder name, no punctuation or quotes, "
-            "do not end with the word folder."
-        )

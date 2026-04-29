@@ -10,12 +10,9 @@ Licensed: unlimited.
 ~/.smartsort/license.key  — one line, the UUID4 key
 """
 
-from __future__ import annotations
-
 import os
 import uuid
 from pathlib import Path
-from typing import Optional
 
 SMARTSORT_DIR = Path.home() / ".smartsort"
 LICENSE_PATH = SMARTSORT_DIR / "license.key"

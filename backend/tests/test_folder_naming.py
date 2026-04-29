@@ -36,7 +36,6 @@ def isolate_cache(tmp_path, monkeypatch):
     don't interfere with real runs.
     """
     temp_cache = tmp_path / "folder_name_cache.json"
-    monkeypatch.setenv("OPENAI_API_KEY", "")  # ensure no accidental API calls
     # monkeypatch the module-global CACHE_PATH constant
     monkeypatch.setattr("backend.agents.folder_naming_agent.CACHE_PATH", str(temp_cache), raising=False)
     # also ensure a clean file exists
